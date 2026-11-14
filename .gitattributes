@@ -1,0 +1,4 @@
+# Files mounted into Linux containers must keep LF line endings, even on Windows.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
