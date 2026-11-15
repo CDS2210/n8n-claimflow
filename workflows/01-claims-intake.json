@@ -1,0 +1,427 @@
+{
+  "id": "pY62sSjeshgn8nDx",
+  "name": "Claims Intake",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "claims",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "9cd2922c-c6ba-48c5-a1b1-47a6691adaea",
+      "name": "Ingestion_Webhook",
+      "webhookId": "09b23cff-e343-4c6e-91d3-ffeb83f746a5"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Validate payload ─────────────────────────────────────────────\n// Mode: Run Once for All Items. Input: the Webhook item.\n// Output: one item { valid, errors[], claim (normalised), received_at }\nconst body = $input.first().json.body;\nconst errors = [];\n\nconst isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);\nconst str = (v) => (typeof v === 'string' ? v.trim() : '');\n\nif (!isObj(body)) {\n  return [{ json: { valid: false, errors: ['Body must be a JSON object'], claim: null } }];\n}\n\nconst claimant = isObj(body.claimant) ? body.claimant : {};\nif (!isObj(body.claimant)) errors.push('claimant is required and must be an object');\n\nconst claim = {\n  idempotency_key: str(body.idempotency_key),\n  policy_number:   str(body.policy_number).toUpperCase(),\n  channel:         str(body.channel).toLowerCase() || 'api',\n  claimant_name:   str(claimant.name),\n  claimant_email:  str(claimant.email).toLowerCase(),\n  claimant_phone:  str(claimant.phone) || null,\n  incident_date:   str(body.incident_date),\n  claimed_amount:  body.claimed_amount,\n  currency:        (str(body.currency) || 'ZAR').toUpperCase(),\n  description:     str(body.description),\n};\n\n// idempotency_key\nif (!claim.idempotency_key) errors.push('idempotency_key is required');\nelse if (claim.idempotency_key.length < 8 || claim.idempotency_key.length > 100)\n  errors.push('idempotency_key must be 8-100 characters');\n\n// policy_number\nif (!claim.policy_number) errors.push('policy_number is required');\nelse if (!/^POL-[A-Z]{3}-\\d{6}$/.test(claim.policy_number))\n  errors.push('policy_number must look like POL-XXX-123456');\n\n// claimant\nif (!claim.claimant_name) errors.push('claimant.name is required');\nif (!claim.claimant_email) errors.push('claimant.email is required');\nelse if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(claim.claimant_email))\n  errors.push('claimant.email is not a valid email address');\n\n// channel\nconst CHANNELS = ['web', 'whatsapp', 'email', 'call_centre', 'api'];\nif (!CHANNELS.includes(claim.channel))\n  errors.push(`channel must be one of: ${CHANNELS.join(', ')}`);\n\n// incident_date: real calendar date, not in the future (SAST)\nconst today = $now.setZone('Africa/Johannesburg').toISODate();\nif (!claim.incident_date) errors.push('incident_date is required');\nelse if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(claim.incident_date) || !DateTime.fromISO(claim.incident_date).isValid)\n  errors.push('incident_date must be a real date in YYYY-MM-DD format');\nelse if (claim.incident_date > today)\n  errors.push(`incident_date ${claim.incident_date} is in the future`);\n\n// claimed_amount\nif (claim.claimed_amount === undefined || claim.claimed_amount === null || claim.claimed_amount === '')\n  errors.push('claimed_amount is required');\nelse if (typeof claim.claimed_amount !== 'number' || !Number.isFinite(claim.claimed_amount))\n  errors.push('claimed_amount must be a number');\nelse if (claim.claimed_amount <= 0)\n  errors.push('claimed_amount must be greater than 0');\nelse if (Number(claim.claimed_amount.toFixed(2)) !== claim.claimed_amount) // float-safe\n  errors.push('claimed_amount can have at most 2 decimal places');\n\n// currency\nif (claim.currency !== 'ZAR') errors.push('currency must be ZAR');\n\n// description\nif (!claim.description) errors.push('description is required');\nelse if (claim.description.length < 10 || claim.description.length > 5000)\n  errors.push('description must be 10-5000 characters');\n\nreturn [{\n  json: {\n    valid: errors.length === 0,\n    errors,\n    claim,\n    raw_payload: body,\n    received_at: $now.toISO(),\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "e995ac80-7e50-4b70-b27a-81483f5112c9",
+      "name": "Validate_Payload_Func"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "d13f3f2b-5c1e-4083-a769-6120b441f0e0",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        448,
+        0
+      ],
+      "id": "c058f036-7613-4579-bdf2-2982ce4bd518",
+      "name": "Is_Valid_If"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "All good",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1792,
+        -112
+      ],
+      "id": "8a94ced0-76b5-44b4-9a9f-e31cd72322f2",
+      "name": "Ok_WebhookR"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"validation_failed\", \"details\": $json.errors } }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        672,
+        192
+      ],
+      "id": "59b017f4-b6cd-4bb4-9b4a-7a3f7762836b",
+      "name": "400_WebhookR"
+    },
+    {
+      "id": "9be07571-d430-4358-85ee-6e557c90b625",
+      "name": "Find_By_Idempotency_PG",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT (SELECT claim_ref FROM claims WHERE idempotency_key = $1) AS existing_claim_ref;",
+        "options": {
+          "queryReplacement": "={{ [ $json.claim.idempotency_key ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "cfPostgresDb0001",
+          "name": "ClaimFlow DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "ae01984a-017e-466d-8ef7-e9c343314105",
+      "name": "Is_Duplicate_If",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "62310eeb-2d6e-4704-905d-cf0526c7828d",
+              "leftValue": "={{ !!$json.existing_claim_ref }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ce03d4c6-e637-40ae-97bd-2f1f0126a672",
+      "name": "200_WebhookR",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1120,
+        192
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"claim_ref\": $json.existing_claim_ref, \"duplicate\": true, \"status_url\": $env.WEBHOOK_URL + \"webhook/claims/status?ref=\" + $json.existing_claim_ref } }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "ff2fe457-af4c-4f2b-9123-ae41d0498470",
+      "name": "Load_Policy_PG",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  p.policy_number,\n  p.holder_name,\n  p.product,\n  p.sum_insured::float8                    AS sum_insured,\n  p.excess::float8                         AS excess,\n  to_char(p.start_date, 'YYYY-MM-DD')      AS start_date,\n  to_char(p.end_date,   'YYYY-MM-DD')      AS end_date,\n  p.status,\n  (SELECT count(*)::int FROM claims c\n    WHERE c.policy_number = $1\n      AND c.reported_at > now() - interval '12 months') AS prior_claims_12m\nFROM (SELECT 1) AS one\nLEFT JOIN policies p ON p.policy_number = $1;",
+        "options": {
+          "queryReplacement": "={{ [ $('Validate_Payload_Func').item.json.claim.policy_number ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "cfPostgresDb0001",
+          "name": "ClaimFlow DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "e3991606-4d77-43eb-8fd3-c938fe1c298f",
+      "name": "Check_Eligibility_Func",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// ── Check eligibility ────────────────────────────────────────────\n// Mode: Run Once for All Items.\n// Input: one row from Load_Policy_PG (policy columns are null if not found).\n// Output: one item carrying everything later nodes need.\nconst v = $('Validate_Payload_Func').first().json;  // validated claim from earlier\nconst p = $input.first().json;                      // policy row from Postgres\nconst c = v.claim;\nconst reasons = [];\n\nif (!p.policy_number) {\n  reasons.push('policy_not_found');\n} else {\n  if (p.status !== 'active') reasons.push('policy_not_active');\n  // Dates are 'YYYY-MM-DD' strings, so plain string comparison is safe\n  if (c.incident_date < p.start_date || c.incident_date > p.end_date)\n    reasons.push('incident_outside_cover');\n  if (c.claimed_amount > p.sum_insured) reasons.push('amount_exceeds_sum_insured');\n}\n\nreturn [{\n  json: {\n    eligible: reasons.length === 0,\n    reasons,\n    claim: c,\n    policy: p.policy_number ? p : null,\n    prior_claims_12m: p.prior_claims_12m ?? 0,\n    raw_payload: v.raw_payload,\n    received_at: v.received_at,\n  },\n}];"
+      }
+    },
+    {
+      "id": "8d71eb84-d2ed-465b-bc26-abc9eb324ea5",
+      "name": "Is_Eligible_If",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1568,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "0a55d168-1feb-4fa8-ae29-d6581e487710",
+              "leftValue": "={{ $json.eligible }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "5926a301-2a40-4689-b622-251109fbe8ad",
+      "name": "Insert_Rejected_Claim_PG",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        1792,
+        192
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH ins AS (\n  INSERT INTO claims (\n    submitted_policy_number, policy_number, claimant_name, claimant_email, claimant_phone,\n    channel, incident_date, description, claimed_amount, currency, idempotency_key,\n    ai_status, route, status, rejection_reasons, raw_payload)\n  VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8, $9::numeric, $10, $11,\n    'skipped', 'rejected', 'rejected_ineligible', $12::jsonb, $13::jsonb)\n  ON CONFLICT (idempotency_key) DO NOTHING\n  RETURNING claim_ref, channel\n), ev AS (\n  INSERT INTO claim_events (claim_ref, event_type, actor, detail)\n  SELECT claim_ref, 'received', 'system', jsonb_build_object('channel', channel) FROM ins\n  UNION ALL\n  SELECT claim_ref, 'rejected_ineligible', 'system', jsonb_build_object('reasons', $12::jsonb) FROM ins\n)\nSELECT (SELECT claim_ref FROM ins) AS claim_ref,\n       EXISTS (SELECT 1 FROM ins)  AS inserted;",
+        "options": {
+          "queryReplacement": "={{ [\n  $json.claim.policy_number,\n  $json.policy?.policy_number ?? null,\n  $json.claim.claimant_name,\n  $json.claim.claimant_email,\n  $json.claim.claimant_phone,\n  $json.claim.channel,\n  $json.claim.incident_date,\n  $json.claim.description,\n  $json.claim.claimed_amount,\n  $json.claim.currency,\n  $json.claim.idempotency_key,\n  JSON.stringify($json.reasons),\n  JSON.stringify($json.raw_payload)\n] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "cfPostgresDb0001",
+          "name": "ClaimFlow DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "fd926aef-0465-4803-9f50-9e84489900fa",
+      "name": "422_WebhookR",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2016,
+        192
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"claim_ref\": $json.claim_ref, \"status\": \"rejected_ineligible\", \"reasons\": $('Check_Eligibility_Func').item.json.reasons } }}",
+        "options": {
+          "responseCode": 422
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Ingestion_Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate_Payload_Func",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate_Payload_Func": {
+      "main": [
+        [
+          {
+            "node": "Is_Valid_If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is_Valid_If": {
+      "main": [
+        [
+          {
+            "node": "Find_By_Idempotency_PG",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "400_WebhookR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find_By_Idempotency_PG": {
+      "main": [
+        [
+          {
+            "node": "Is_Duplicate_If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is_Duplicate_If": {
+      "main": [
+        [
+          {
+            "node": "200_WebhookR",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Load_Policy_PG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load_Policy_PG": {
+      "main": [
+        [
+          {
+            "node": "Check_Eligibility_Func",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check_Eligibility_Func": {
+      "main": [
+        [
+          {
+            "node": "Is_Eligible_If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is_Eligible_If": {
+      "main": [
+        [
+          {
+            "node": "Ok_WebhookR",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert_Rejected_Claim_PG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert_Rejected_Claim_PG": {
+      "main": [
+        [
+          {
+            "node": "422_WebhookR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "pinData": {},
+  "meta": {},
+  "tags": []
+}
