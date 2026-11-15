@@ -172,6 +172,31 @@ API key:
   Anthropic / Ollama" as a config switch. Noted under production next steps.
 - **Information Extractor node.** Similar result, but the LLM Chain gives explicit control of
   the system message, which the injection guard needs.
+- **Two-stage chain (reasoning model interprets, fast model structures).** Rejected. Stage 1
+  would rewrite untrusted claimant text into the model's own words, so an injection could
+  reach stage 2 looking trusted. Every claim would also pay for two calls.
+
+### Next step: confidence-based escalation (not built)
+Cheap first, escalate only when needed:
+
+```
+gpt-6-luna analyses every claim
+  └─ uncertain? (ai_risk_score 40-70, prompt_injection_attempt, vague_description,
+                 or ai.status = failed)
+       └─ re-analyse with a reasoning model: same tagged prompt, same schema
+```
+
+- Most claims stay on the fast, cheap path. Only grey-zone claims pay for deeper reasoning.
+- Both models read the **original** tagged description, so nothing untrusted is passed through
+  as model output.
+- Routing stays deterministic: the rules layer (Chunk D) still makes the final decision.
+- Needs: a second model sub-node and chain, an `ESCALATION_MODEL` env var, a threshold in
+  the rules `CONFIG`, and an audit event recording which model produced the final analysis.
+
+### Model choice and cost (checked 2026-11-15)
+Default `OPENAI_MODEL=gpt-6-luna`. `gpt-4o-mini` and `gpt-4.1-mini` are deprecated and shut
+down on 2027-01-14. At about 1,100 input and 150 output tokens per claim, gpt-6-luna is about
+$0.19 per 1,000 claims (USD list price, assuming no reasoning tokens are billed).
 
 ## Rules layer (single config object in the Code node)
 
