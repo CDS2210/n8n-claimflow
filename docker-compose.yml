@@ -1,15 +1,44 @@
-# ClaimFlow — local stack
-#   docker compose up -d                      -> n8n + Postgres + Mailpit
+# ClaimFlow — local stack. Run ./scripts/setup.sh (it creates certs/keys, then starts this).
+#   docker compose up -d                      -> Caddy + n8n + Postgres + Mailpit
 #   docker compose --profile ollama up -d     -> also starts a local LLM
 #
-# All ports bind to 127.0.0.1 only, so nothing is exposed to your network.
+# Only Caddy (HTTPS) and Postgres (TLS required) are published, on 127.0.0.1 only.
+# Certificates in ./certs come from one local CA created by scripts/setup.sh (gitignored).
 
 name: claimflow
 
 services:
+  caddy:
+    # TLS termination for the n8n editor/webhooks and the Mailpit web inbox.
+    image: caddy:2.11.9-alpine
+    restart: unless-stopped
+    depends_on:
+      - n8n
+      - mailpit
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+      - caddy_data:/data
+    ports:
+      - "127.0.0.1:${HTTPS_PORT}:8443"         # n8n editor + webhooks
+      - "127.0.0.1:${MAILPIT_UI_PORT}:8025"    # Mailpit web inbox
+
   postgres:
     image: postgres:16.16-alpine
     restart: unless-stopped
+    # Postgres refuses a private key that isn't owned by it with mode 600, which a Windows
+    # bind mount can't provide. So copy the cert/key in with the right owner, then start.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        install -d -o postgres -g postgres -m 700 /var/lib/postgresql/ssl &&
+        install -o postgres -g postgres -m 600 /certs/postgres.key /var/lib/postgresql/ssl/server.key &&
+        install -o postgres -g postgres -m 644 /certs/postgres.crt /var/lib/postgresql/ssl/server.crt &&
+        exec docker-entrypoint.sh postgres
+        -c ssl=on
+        -c ssl_cert_file=/var/lib/postgresql/ssl/server.crt
+        -c ssl_key_file=/var/lib/postgresql/ssl/server.key
+        -c ssl_min_protocol_version=TLSv1.2
     environment:
       # Superuser, only used by the init script to create the two databases below.
       POSTGRES_USER: ${POSTGRES_SUPERUSER}
@@ -27,10 +56,11 @@ services:
       - pg_data:/var/lib/postgresql/data
       # Scripts in this folder run once, the first time the volume is empty.
       - ./db/00-init-databases.sh:/docker-entrypoint-initdb.d/00-init-databases.sh:ro
-      # SQL files the init script loads into the claimflow DB (schema/seed, stage 2).
+      # SQL files the init script loads into the claimflow DB.
       - ./db:/claimflow-sql:ro
+      - ./certs:/certs:ro
     ports:
-      - "127.0.0.1:${POSTGRES_PORT}:5432"
+      - "127.0.0.1:${POSTGRES_PORT}:5432"     # TLS required for TCP connections
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_SUPERUSER} -d postgres"]
       interval: 5s
@@ -43,12 +73,14 @@ services:
     restart: unless-stopped
     environment:
       MP_SMTP_AUTH_ACCEPT_ANY: "1"
-      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+      MP_SMTP_TLS_CERT: /certs/mailpit.crt
+      MP_SMTP_TLS_KEY: /certs/mailpit.key
+      MP_SMTP_REQUIRE_STARTTLS: "true"         # refuse plain-text SMTP
       MP_MAX_MESSAGES: "5000"
       TZ: ${TZ}
-    ports:
-      - "127.0.0.1:${MAILPIT_UI_PORT}:8025"   # web inbox
-      # SMTP (1025) is only reachable inside the Docker network; n8n uses mailpit:1025.
+    volumes:
+      - ./certs:/certs:ro
+    # No host ports: SMTP (1025) is internal only; the web UI is served through Caddy.
 
   n8n:
     image: n8nio/n8n:2.47.7
@@ -66,31 +98,42 @@ services:
       DB_POSTGRESDB_DATABASE: n8n
       DB_POSTGRESDB_USER: ${N8N_DB_USER}
       DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD}
+      DB_POSTGRESDB_SSL_ENABLED: "true"
+      DB_POSTGRESDB_SSL_CA_FILE: /certs/ca.crt   # _FILE: n8n reads the PEM from this path
+      DB_POSTGRESDB_SSL_REJECT_UNAUTHORIZED: "true"
 
       # Encrypts stored credentials. If you lose it, saved credentials become unreadable.
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
 
-      # --- URLs: webhooks and approval links in emails are built from WEBHOOK_URL ---
+      # --- URLs: n8n speaks plain HTTP inside Docker; Caddy terminates TLS in front of it ---
       N8N_HOST: localhost
       N8N_PORT: 5678
       N8N_PROTOCOL: http
+      N8N_PROXY_HOPS: "1"                      # trust X-Forwarded-* from Caddy
       WEBHOOK_URL: ${N8N_PUBLIC_URL}
       N8N_EDITOR_BASE_URL: ${N8N_PUBLIC_URL}
-      N8N_SECURE_COOKIE: "false"   # plain http on localhost
+      N8N_SECURE_COOKIE: "true"
+      # Trust the local CA for outgoing TLS (SMTP STARTTLS to Mailpit, etc.)
+      NODE_EXTRA_CA_CERTS: /certs/ca.crt
 
       # --- Locale ---
       GENERIC_TIMEZONE: ${TZ}      # used by Schedule Trigger (07:00 SAST report)
       TZ: ${TZ}
 
       # --- Behaviour ---
-      # Code nodes read LLM_MODE and the rules config from env, which n8n 2.x blocks by default.
+      # Code nodes read LLM_MODE, rules config and PII keys from env, which n8n 2.x blocks by default.
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      # Code nodes may use Node's crypto module (PII encryption). Nothing else is allowed.
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto
       # Code nodes run in a "task runner" process; cap each run (default will change upstream).
       N8N_RUNNERS_TASK_TIMEOUT: "60"
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_PERSONALIZATION_ENABLED: "false"
       EXECUTIONS_DATA_PRUNE: "true"
-      EXECUTIONS_DATA_MAX_AGE: "336"   # hours (14 days)
+      EXECUTIONS_DATA_MAX_AGE: "168"   # hours (7 days); PI workflows also skip saving successful runs
+      # Successful runs of PI workflows are soft-deleted at once (their start data still holds the
+      # raw webhook body); hard-delete them every 5 min instead of the default 15.
+      EXECUTIONS_DATA_PRUNE_HARD_DELETE_INTERVAL: "5"
 
       # --- App settings read by the workflows via $env ---
       LLM_MODE: ${LLM_MODE}
@@ -101,6 +144,9 @@ services:
       CLAIMFLOW_OPS_EMAIL: ${CLAIMFLOW_OPS_EMAIL}
       CLAIMFLOW_FROM_EMAIL: ${CLAIMFLOW_FROM_EMAIL}
       CLAIMFLOW_REVIEW_TIMEOUT_HOURS: ${CLAIMFLOW_REVIEW_TIMEOUT_HOURS}
+      # Field-level PII encryption (AES-256-GCM) and blind-index (HMAC) keys
+      CLAIMFLOW_PII_KEY: ${CLAIMFLOW_PII_KEY}
+      CLAIMFLOW_PII_HMAC_KEY: ${CLAIMFLOW_PII_HMAC_KEY}
 
       # --- Used only by scripts/setup.sh to create credentials (never stored in workflow JSON) ---
       CLAIMFLOW_DB_USER: ${CLAIMFLOW_DB_USER}
@@ -109,10 +155,11 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
     volumes:
       - n8n_data:/home/node/.n8n
-      # Workflow JSON is mounted so the n8n CLI can import/export it.
+      # Workflow JSON and setup helpers are mounted so the n8n CLI can import them.
       - ./workflows:/workflows
-    ports:
-      - "127.0.0.1:${N8N_PORT}:5678"
+      - ./scripts:/scripts:ro
+      - ./certs:/certs:ro
+    # No host port: reach n8n through Caddy at https://localhost:${HTTPS_PORT}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz >/dev/null 2>&1 || exit 1"]
       interval: 10s
@@ -132,4 +179,5 @@ services:
 volumes:
   pg_data:
   n8n_data:
+  caddy_data:
   ollama_data:

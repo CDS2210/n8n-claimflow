@@ -1,0 +1,24 @@
+# TLS termination for ClaimFlow. Certificates are issued by the local CA that
+# scripts/setup.sh creates (certs/ca.crt). In production this role is played by
+# Azure Application Gateway / Front Door.
+{
+	auto_https off   # we bring our own certificates
+	admin off
+}
+
+# n8n editor, webhooks and approval links
+https://localhost:8443 {
+	tls /certs/localhost.crt /certs/localhost.key {
+		protocols tls1.2 tls1.3
+	}
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy n8n:5678
+}
+
+# Mailpit web inbox
+https://localhost:8025 {
+	tls /certs/localhost.crt /certs/localhost.key {
+		protocols tls1.2 tls1.3
+	}
+	reverse_proxy mailpit:8025
+}

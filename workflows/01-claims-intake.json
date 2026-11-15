@@ -78,7 +78,7 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.5,
       "position": [
-        2976,
+        3200,
         0
       ],
       "id": "8a94ced0-76b5-44b4-9a9f-e31cd72322f2",
@@ -189,7 +189,7 @@
       ],
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT\n  p.policy_number,\n  p.holder_name,\n  p.product,\n  p.sum_insured::float8                    AS sum_insured,\n  p.excess::float8                         AS excess,\n  to_char(p.start_date, 'YYYY-MM-DD')      AS start_date,\n  to_char(p.end_date,   'YYYY-MM-DD')      AS end_date,\n  p.status,\n  (SELECT count(*)::int FROM claims c\n    WHERE c.policy_number = $1\n      AND c.reported_at > now() - interval '12 months') AS prior_claims_12m\nFROM (SELECT 1) AS one\nLEFT JOIN policies p ON p.policy_number = $1;",
+        "query": "SELECT\n  p.policy_number,\n  p.product,\n  p.sum_insured::float8                    AS sum_insured,\n  p.excess::float8                         AS excess,\n  to_char(p.start_date, 'YYYY-MM-DD')      AS start_date,\n  to_char(p.end_date,   'YYYY-MM-DD')      AS end_date,\n  p.status,\n  (SELECT count(*)::int FROM claims c\n    WHERE c.policy_number = $1\n      AND c.reported_at > now() - interval '12 months') AS prior_claims_12m\nFROM (SELECT 1) AS one\nLEFT JOIN policies p ON p.policy_number = $1;",
         "options": {
           "queryReplacement": "={{ [ $('Validate_Payload_Func').item.json.claim.policy_number ] }}"
         }
@@ -223,7 +223,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.4,
       "position": [
-        1568,
+        1792,
         0
       ],
       "parameters": {
@@ -257,14 +257,14 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.8,
       "position": [
-        1792,
+        2016,
         192
       ],
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH ins AS (\n  INSERT INTO claims (\n    submitted_policy_number, policy_number, claimant_name, claimant_email, claimant_phone,\n    channel, incident_date, description, claimed_amount, currency, idempotency_key,\n    ai_status, route, status, rejection_reasons, raw_payload)\n  VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8, $9::numeric, $10, $11,\n    'skipped', 'rejected', 'rejected_ineligible', $12::jsonb, $13::jsonb)\n  ON CONFLICT (idempotency_key) DO NOTHING\n  RETURNING claim_ref, channel\n), ev AS (\n  INSERT INTO claim_events (claim_ref, event_type, actor, detail)\n  SELECT claim_ref, 'received', 'system', jsonb_build_object('channel', channel) FROM ins\n  UNION ALL\n  SELECT claim_ref, 'rejected_ineligible', 'system', jsonb_build_object('reasons', $12::jsonb) FROM ins\n)\nSELECT (SELECT claim_ref FROM ins) AS claim_ref,\n       EXISTS (SELECT 1 FROM ins)  AS inserted;",
+        "query": "WITH ins AS (\n  INSERT INTO claims (\n    submitted_policy_number, policy_number,\n    claimant_name_enc, claimant_email_enc, claimant_email_hmac, claimant_phone_enc,\n    channel, incident_date, description, claimed_amount, currency, idempotency_key,\n    ai_status, route, status, rejection_reasons, raw_payload)\n  VALUES ($1, $2, $3, $4, $5, $6, $7, $8::date, $9, $10::numeric, $11, $12,\n    'skipped', 'rejected', 'rejected_ineligible', $13::jsonb, $14::jsonb)\n  ON CONFLICT (idempotency_key) DO NOTHING\n  RETURNING claim_ref, channel\n), ev AS (\n  INSERT INTO claim_events (claim_ref, event_type, actor, detail)\n  SELECT claim_ref, 'received', 'system', jsonb_build_object('channel', channel) FROM ins\n  UNION ALL\n  SELECT claim_ref, 'rejected_ineligible', 'system', jsonb_build_object('reasons', $13::jsonb) FROM ins\n)\nSELECT (SELECT claim_ref FROM ins) AS claim_ref,\n       EXISTS (SELECT 1 FROM ins)  AS inserted;",
         "options": {
-          "queryReplacement": "={{ [\n  $json.claim.policy_number,\n  $json.policy?.policy_number ?? null,\n  $json.claim.claimant_name,\n  $json.claim.claimant_email,\n  $json.claim.claimant_phone,\n  $json.claim.channel,\n  $json.claim.incident_date,\n  $json.claim.description,\n  $json.claim.claimed_amount,\n  $json.claim.currency,\n  $json.claim.idempotency_key,\n  JSON.stringify($json.reasons),\n  JSON.stringify($json.raw_payload)\n] }}"
+          "queryReplacement": "={{ [\n  $json.claim.policy_number,\n  $json.policy?.policy_number ?? null,\n  $json.pii.name_enc,\n  $json.pii.email_enc,\n  $json.pii.email_hmac,\n  $json.pii.phone_enc ?? null,\n  $json.claim.channel,\n  $json.claim.incident_date,\n  $json.claim.description,\n  $json.claim.claimed_amount,\n  $json.claim.currency,\n  $json.claim.idempotency_key,\n  JSON.stringify($json.reasons),\n  JSON.stringify($json.raw_payload)\n] }}"
         }
       },
       "credentials": {
@@ -283,12 +283,12 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.5,
       "position": [
-        2016,
+        2240,
         192
       ],
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ { \"claim_ref\": $json.claim_ref, \"status\": \"rejected_ineligible\", \"reasons\": $('Check_Eligibility_Func').item.json.reasons } }}",
+        "responseBody": "={{ { \"claim_ref\": $json.claim_ref, \"status\": \"rejected_ineligible\", \"reasons\": $('Encrypt_PII_Func').item.json.reasons } }}",
         "options": {
           "responseCode": 422
         }
@@ -300,7 +300,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1792,
+        2016,
         0
       ],
       "parameters": {
@@ -313,7 +313,7 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.5,
       "position": [
-        2016,
+        2240,
         0
       ],
       "parameters": {
@@ -430,7 +430,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2336,
+        2560,
         -400
       ],
       "parameters": {
@@ -444,11 +444,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2752,
+        2976,
         0
       ],
       "parameters": {
-        "jsCode": "// ── Normalise AI result ──────────────────────────────────────────\n// Receives ONE item from whichever branch ran: a success ({ output }) or an\n// error-output item ({ error }). Never trusts the model: every field is\n// checked against the schema. Anything wrong -> ai.status = 'failed', which\n// Chunk D routes to manual review.\nconst ctx = $('Check_Eligibility_Func').first().json;   // claim + policy context\nconst item = $input.first().json;\n\nconst mode = String($env.LLM_MODE || '').toLowerCase();\nconst model = { mock: 'mock', openai: $env.OPENAI_MODEL, anthropic: $env.ANTHROPIC_MODEL, ollama: $env.OLLAMA_MODEL }[mode] || `unknown mode \"${mode}\"`;\n\nconst CLAIM_TYPES = ['windscreen', 'collision', 'theft', 'water_damage', 'fire', 'storm', 'burglary',\n  'accidental_damage', 'lost_baggage', 'medical', 'other'];\nconst SEVERITIES = ['low', 'medium', 'high', 'critical'];\nconst INDICATORS = ['new_policy_concern', 'vague_description', 'inconsistent_details', 'urgency_language',\n  'cash_payment_request', 'amount_seems_inflated', 'third_party_pressure', 'prompt_injection_attempt', 'other'];\n\nconst problems = [];\nconst warnings = [];\nconst isStrArray = (v) => Array.isArray(v) && v.every((x) => typeof x === 'string');\nconst norm = (s) => String(s).trim().toLowerCase().replace(/[\\s-]+/g, '_');\n\nlet ai = null;\nif (item.error) {\n  const msg = typeof item.error === 'string' ? item.error : (item.error.message || JSON.stringify(item.error));\n  problems.push(`llm_error: ${msg.slice(0, 300)}`);\n} else if (!['mock', 'openai', 'anthropic', 'ollama'].includes(mode)) {\n  problems.push(`unknown LLM_MODE \"${mode}\"`);\n} else if (!item.output || typeof item.output !== 'object') {\n  problems.push('no structured output from model');\n} else {\n  const o = item.output;\n  const claim_type = norm(o.claim_type ?? '');\n  const severity = norm(o.severity ?? '');\n  const score = Number(o.ai_risk_score);\n\n  if (!CLAIM_TYPES.includes(claim_type)) problems.push(`invalid claim_type \"${o.claim_type}\"`);\n  if (!SEVERITIES.includes(severity)) problems.push(`invalid severity \"${o.severity}\"`);\n  if (typeof o.ai_risk_score !== 'number' && typeof o.ai_risk_score !== 'string') problems.push('ai_risk_score missing');\n  else if (!Number.isFinite(score)) problems.push(`ai_risk_score not a number \"${o.ai_risk_score}\"`);\n  if (typeof o.summary !== 'string' || !o.summary.trim()) problems.push('summary missing');\n  if (!isStrArray(o.fraud_indicators ?? [])) problems.push('fraud_indicators must be a list of strings');\n  if (!isStrArray(o.missing_information ?? [])) problems.push('missing_information must be a list of strings');\n\n  if (problems.length === 0) {\n    // Known vocabulary only; anything unexpected is kept as \"other\" and noted.\n    const indicators = [...new Set((o.fraud_indicators ?? []).map((x) => {\n      const n = norm(x);\n      if (INDICATORS.includes(n)) return n;\n      warnings.push(`unknown indicator \"${x}\" stored as other`);\n      return 'other';\n    }))];\n    const clamped = Math.max(0, Math.min(100, Math.round(score)));\n    if (clamped !== score) warnings.push(`ai_risk_score ${score} clamped to ${clamped}`);\n\n    ai = {\n      claim_type,\n      severity,\n      summary: o.summary.trim().slice(0, 500),\n      fraud_indicators: indicators,\n      ai_risk_score: clamped,\n      missing_information: (o.missing_information ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 10),\n    };\n  }\n}\n\nreturn [{\n  json: {\n    ...ctx,\n    ai: {\n      status: ai ? 'ok' : 'failed',\n      mode,\n      model,\n      problems,\n      warnings,\n      claim_type: ai?.claim_type ?? null,\n      severity: ai?.severity ?? null,\n      summary: ai?.summary ?? null,\n      fraud_indicators: ai?.fraud_indicators ?? [],\n      ai_risk_score: ai?.ai_risk_score ?? null,\n      missing_information: ai?.missing_information ?? [],\n    },\n  },\n}];"
+        "jsCode": "// ── Normalise AI result ──────────────────────────────────────────\n// Receives ONE item from whichever branch ran: a success ({ output }) or an\n// error-output item ({ error }). Never trusts the model: every field is\n// checked against the schema. Anything wrong -> ai.status = 'failed', which\n// Chunk D routes to manual review.\nconst ctx = $('Encrypt_PII_Func').first().json;   // claim (no PII) + policy context\nconst item = $input.first().json;\n\nconst mode = String($env.LLM_MODE || '').toLowerCase();\nconst model = { mock: 'mock', openai: $env.OPENAI_MODEL, anthropic: $env.ANTHROPIC_MODEL, ollama: $env.OLLAMA_MODEL }[mode] || `unknown mode \"${mode}\"`;\n\nconst CLAIM_TYPES = ['windscreen', 'collision', 'theft', 'water_damage', 'fire', 'storm', 'burglary',\n  'accidental_damage', 'lost_baggage', 'medical', 'other'];\nconst SEVERITIES = ['low', 'medium', 'high', 'critical'];\nconst INDICATORS = ['new_policy_concern', 'vague_description', 'inconsistent_details', 'urgency_language',\n  'cash_payment_request', 'amount_seems_inflated', 'third_party_pressure', 'prompt_injection_attempt', 'other'];\n\nconst problems = [];\nconst warnings = [];\nconst isStrArray = (v) => Array.isArray(v) && v.every((x) => typeof x === 'string');\nconst norm = (s) => String(s).trim().toLowerCase().replace(/[\\s-]+/g, '_');\n\nlet ai = null;\nif (item.error) {\n  const msg = typeof item.error === 'string' ? item.error : (item.error.message || JSON.stringify(item.error));\n  problems.push(`llm_error: ${msg.slice(0, 300)}`);\n} else if (!['mock', 'openai', 'anthropic', 'ollama'].includes(mode)) {\n  problems.push(`unknown LLM_MODE \"${mode}\"`);\n} else if (!item.output || typeof item.output !== 'object') {\n  problems.push('no structured output from model');\n} else {\n  const o = item.output;\n  const claim_type = norm(o.claim_type ?? '');\n  const severity = norm(o.severity ?? '');\n  const score = Number(o.ai_risk_score);\n\n  if (!CLAIM_TYPES.includes(claim_type)) problems.push(`invalid claim_type \"${o.claim_type}\"`);\n  if (!SEVERITIES.includes(severity)) problems.push(`invalid severity \"${o.severity}\"`);\n  if (typeof o.ai_risk_score !== 'number' && typeof o.ai_risk_score !== 'string') problems.push('ai_risk_score missing');\n  else if (!Number.isFinite(score)) problems.push(`ai_risk_score not a number \"${o.ai_risk_score}\"`);\n  if (typeof o.summary !== 'string' || !o.summary.trim()) problems.push('summary missing');\n  if (!isStrArray(o.fraud_indicators ?? [])) problems.push('fraud_indicators must be a list of strings');\n  if (!isStrArray(o.missing_information ?? [])) problems.push('missing_information must be a list of strings');\n\n  if (problems.length === 0) {\n    // Known vocabulary only; anything unexpected is kept as \"other\" and noted.\n    const indicators = [...new Set((o.fraud_indicators ?? []).map((x) => {\n      const n = norm(x);\n      if (INDICATORS.includes(n)) return n;\n      warnings.push(`unknown indicator \"${x}\" stored as other`);\n      return 'other';\n    }))];\n    const clamped = Math.max(0, Math.min(100, Math.round(score)));\n    if (clamped !== score) warnings.push(`ai_risk_score ${score} clamped to ${clamped}`);\n\n    ai = {\n      claim_type,\n      severity,\n      summary: o.summary.trim().slice(0, 500),\n      fraud_indicators: indicators,\n      ai_risk_score: clamped,\n      missing_information: (o.missing_information ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 10),\n    };\n  }\n}\n\nreturn [{\n  json: {\n    ...ctx,\n    ai: {\n      status: ai ? 'ok' : 'failed',\n      mode,\n      model,\n      problems,\n      warnings,\n      claim_type: ai?.claim_type ?? null,\n      severity: ai?.severity ?? null,\n      summary: ai?.summary ?? null,\n      fraud_indicators: ai?.fraud_indicators ?? [],\n      ai_risk_score: ai?.ai_risk_score ?? null,\n      missing_information: ai?.missing_information ?? [],\n    },\n  },\n}];"
       }
     },
     {
@@ -457,7 +457,7 @@
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.9,
       "position": [
-        2336,
+        2560,
         -160
       ],
       "parameters": {
@@ -484,7 +484,7 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.3,
       "position": [
-        2272,
+        2496,
         16
       ],
       "parameters": {
@@ -511,7 +511,7 @@
       "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
       "typeVersion": 1.3,
       "position": [
-        2432,
+        2656,
         16
       ],
       "parameters": {
@@ -526,7 +526,7 @@
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.9,
       "position": [
-        2336,
+        2560,
         200
       ],
       "parameters": {
@@ -553,7 +553,7 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
       "typeVersion": 1.6,
       "position": [
-        2272,
+        2496,
         376
       ],
       "parameters": {
@@ -580,7 +580,7 @@
       "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
       "typeVersion": 1.3,
       "position": [
-        2432,
+        2656,
         376
       ],
       "parameters": {
@@ -595,7 +595,7 @@
       "type": "@n8n/n8n-nodes-langchain.chainLlm",
       "typeVersion": 1.9,
       "position": [
-        2336,
+        2560,
         560
       ],
       "parameters": {
@@ -622,7 +622,7 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
       "typeVersion": 1,
       "position": [
-        2272,
+        2496,
         736
       ],
       "parameters": {
@@ -645,13 +645,26 @@
       "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
       "typeVersion": 1.3,
       "position": [
-        2432,
+        2656,
         736
       ],
       "parameters": {
         "schemaType": "manual",
         "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"claim_type\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"windscreen\",\n        \"collision\",\n        \"theft\",\n        \"water_damage\",\n        \"fire\",\n        \"storm\",\n        \"burglary\",\n        \"accidental_damage\",\n        \"lost_baggage\",\n        \"medical\",\n        \"other\"\n      ]\n    },\n    \"severity\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"low\",\n        \"medium\",\n        \"high\",\n        \"critical\"\n      ]\n    },\n    \"summary\": {\n      \"type\": \"string\"\n    },\n    \"fraud_indicators\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\",\n        \"enum\": [\n          \"new_policy_concern\",\n          \"vague_description\",\n          \"inconsistent_details\",\n          \"urgency_language\",\n          \"cash_payment_request\",\n          \"amount_seems_inflated\",\n          \"third_party_pressure\",\n          \"prompt_injection_attempt\",\n          \"other\"\n        ]\n      }\n    },\n    \"ai_risk_score\": {\n      \"type\": \"integer\",\n      \"minimum\": 0,\n      \"maximum\": 100\n    },\n    \"missing_information\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\"\n      }\n    }\n  },\n  \"required\": [\n    \"claim_type\",\n    \"severity\",\n    \"summary\",\n    \"fraud_indicators\",\n    \"ai_risk_score\",\n    \"missing_information\"\n  ]\n}",
         "autoFix": false
+      }
+    },
+    {
+      "id": "5625a3bb-27b7-4c5e-8b12-630c3abd5b17",
+      "name": "Encrypt_PII_Func",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// ── ClaimFlow PII crypto ──────────────────────────────────────────\n// Single source of truth for field-level encryption. Used by:\n//   * the Encrypt_PII_Func Code node (this source is copied into the workflow)\n//   * scripts/encrypt-seed-pii.js (require()d directly)\n// Format: v1:<iv b64>:<auth tag b64>:<ciphertext b64>   (AES-256-GCM)\n// The field name (\"name\" | \"email\" | \"phone\") is bound as associated data, so a\n// ciphertext moved to a different column will not decrypt. See docs/security.md.\nconst crypto = require('crypto');\n\nfunction piiKeys(env) {\n  const key = Buffer.from(String(env.CLAIMFLOW_PII_KEY || ''), 'base64');\n  const hmacKey = Buffer.from(String(env.CLAIMFLOW_PII_HMAC_KEY || ''), 'base64');\n  if (key.length !== 32) throw new Error('CLAIMFLOW_PII_KEY must be 32 random bytes, base64-encoded');\n  if (hmacKey.length !== 32) throw new Error('CLAIMFLOW_PII_HMAC_KEY must be 32 random bytes, base64-encoded');\n  if (key.equals(hmacKey)) throw new Error('CLAIMFLOW_PII_KEY and CLAIMFLOW_PII_HMAC_KEY must differ');\n  return { v1: key, hmacKey };\n}\n\nfunction encryptField(value, field, keys) {\n  if (value === null || value === undefined || String(value).trim() === '') return null;\n  const iv = crypto.randomBytes(12);\n  const cipher = crypto.createCipheriv('aes-256-gcm', keys.v1, iv);\n  cipher.setAAD(Buffer.from(field, 'utf8'));\n  const ct = Buffer.concat([cipher.update(String(value), 'utf8'), cipher.final()]);\n  return ['v1', iv.toString('base64'), cipher.getAuthTag().toString('base64'), ct.toString('base64')].join(':');\n}\n\nfunction decryptField(token, field, keys) {\n  if (token === null || token === undefined) return null;\n  const [version, iv, tag, ct] = String(token).split(':');\n  const key = keys[version];\n  if (!key || !iv || !tag || ct === undefined) throw new Error(`Unsupported or malformed ciphertext (${version})`);\n  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64'));\n  decipher.setAAD(Buffer.from(field, 'utf8'));\n  decipher.setAuthTag(Buffer.from(tag, 'base64'));\n  return Buffer.concat([decipher.update(Buffer.from(ct, 'base64')), decipher.final()]).toString('utf8');\n}\n\n// Deterministic, non-reversible lookup key for exact-match email searches.\nfunction blindIndex(email, keys) {\n  return crypto.createHmac('sha256', keys.hmacKey).update(String(email).trim().toLowerCase(), 'utf8').digest('hex');\n}\n\n// ── Encrypt PII ───────────────────────────────────────────────────\n// Everything after this node carries ciphertext only: name, email and phone are\n// removed from the claim, and the raw payload's claimant block is redacted.\n// Library above is copied verbatim from scripts/lib/pii-crypto.js (setup.sh uses the same file).\nconst keys = piiKeys($env);\nconst e = $input.first().json;\nconst { claimant_name, claimant_email, claimant_phone, ...claim } = e.claim;\n\nconst pii = {\n  name_enc:   encryptField(claimant_name, 'name', keys),\n  email_enc:  encryptField(claimant_email, 'email', keys),\n  email_hmac: blindIndex(claimant_email, keys),\n  phone_enc:  encryptField(claimant_phone, 'phone', keys),\n};\n\nconst raw = { ...(e.raw_payload || {}) };\nif (raw.claimant !== undefined) {\n  raw.claimant = raw.claimant && typeof raw.claimant === 'object'\n    ? Object.fromEntries(Object.keys(raw.claimant).map((k) => [k, '[encrypted]']))\n    : '[encrypted]';\n}\n\nreturn [{ json: { ...e, claim, pii, raw_payload: raw } }];"
       }
     }
   ],
@@ -740,7 +753,7 @@
       "main": [
         [
           {
-            "node": "Is_Eligible_If",
+            "node": "Encrypt_PII_Func",
             "type": "main",
             "index": 0
           }
@@ -974,11 +987,26 @@
           }
         ]
       ]
+    },
+    "Encrypt_PII_Func": {
+      "main": [
+        [
+          {
+            "node": "Is_Eligible_If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
     "executionOrder": "v1",
-    "binaryMode": "separate"
+    "binaryMode": "separate",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": false
   },
   "pinData": {},
   "meta": {},

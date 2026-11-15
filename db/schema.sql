@@ -8,6 +8,9 @@
 --   * Money is numeric(12,2), never float. Currency defaults to ZAR.
 --   * All timestamps are timestamptz (stored UTC, displayed in Africa/Johannesburg).
 --   * claim_events is append-only: a trigger blocks UPDATE and DELETE.
+--   * Personal information (name, email, phone) is stored ONLY as ciphertext produced by
+--     n8n (AES-256-GCM, format v1:<iv>:<tag>:<data>). The DB never sees plaintext or keys.
+--     Email also gets an HMAC-SHA256 blind index for exact-match lookups. docs/security.md
 -- =====================================================================
 
 SET client_min_messages = warning;
@@ -22,14 +25,23 @@ BEGIN
   RETURN NEW;
 END $$;
 
+-- Format guards for encrypted personal information
+CREATE DOMAIN pii_ciphertext AS text
+  CHECK (VALUE ~ '^v[0-9]+:[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+$');
+CREATE DOMAIN pii_blind_index AS text
+  CHECK (VALUE ~ '^[0-9a-f]{64}$');
+
 -- ---------------------------------------------------------------------
 -- policies: who is covered, for what, and for how much
 -- ---------------------------------------------------------------------
 CREATE TABLE policies (
   policy_number  text PRIMARY KEY,
-  holder_name    text           NOT NULL,
-  holder_email   text           NOT NULL,
-  holder_phone   text,
+  -- PI, encrypted by n8n. Nullable only because seed rows are encrypted by setup.sh
+  -- right after the schema loads (see db/seed.sql).
+  holder_name_enc    pii_ciphertext,
+  holder_email_enc   pii_ciphertext,
+  holder_email_hmac  pii_blind_index,
+  holder_phone_enc   pii_ciphertext,
   product        text           NOT NULL CHECK (product IN ('motor','home','travel','device')),
   sum_insured    numeric(12,2)  NOT NULL CHECK (sum_insured > 0),
   excess         numeric(12,2)  NOT NULL DEFAULT 0 CHECK (excess >= 0),
@@ -60,9 +72,11 @@ CREATE TABLE claims (
   -- policy exists, so invalid claims can still be stored and audited.
   submitted_policy_number text          NOT NULL,
   policy_number           text          REFERENCES policies (policy_number),  -- NULL if not found
-  claimant_name           text          NOT NULL,
-  claimant_email          text          NOT NULL,
-  claimant_phone          text,
+  -- PI, encrypted by n8n (Encrypt_PII_Func). Seed rows are encrypted by setup.sh.
+  claimant_name_enc       pii_ciphertext,
+  claimant_email_enc      pii_ciphertext,
+  claimant_email_hmac     pii_blind_index,
+  claimant_phone_enc      pii_ciphertext,
   channel                 text          NOT NULL DEFAULT 'api'
                           CHECK (channel IN ('web','whatsapp','email','call_centre','api')),
   incident_date           date          NOT NULL,
@@ -107,7 +121,7 @@ CREATE TABLE claims (
   reviewer_notes          text,
   reviewed_at             timestamptz,
 
-  raw_payload             jsonb         NOT NULL,         -- exactly what arrived, for audit
+  raw_payload             jsonb         NOT NULL,         -- what arrived, with PI fields replaced by "[encrypted]"
   created_at              timestamptz   NOT NULL DEFAULT now(),
   updated_at              timestamptz   NOT NULL DEFAULT now()
 );
@@ -135,6 +149,8 @@ CREATE TRIGGER claims_set_updated_at
 -- Fraud rule "prior claims on this policy in the last 12 months"
 CREATE INDEX claims_policy_reported_idx ON claims (policy_number, reported_at DESC);
 -- Ops report + SLA checks
+-- Blind-index lookups ("other claims from this email address")
+CREATE INDEX claims_email_hmac_idx      ON claims (claimant_email_hmac);
 CREATE INDEX claims_status_idx          ON claims (status, reported_at);
 CREATE INDEX claims_created_idx         ON claims (created_at);
 
