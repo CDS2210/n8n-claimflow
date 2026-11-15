@@ -167,10 +167,21 @@ services:
       retries: 30
 
   ollama:
-    # Optional free local LLM. Only starts with: --profile ollama
+    # Optional free local LLM. Only starts with: --profile ollama (setup.sh does this when
+    # LLM_MODE=ollama). Uses an NVIDIA GPU if Docker can see one; remove the "deploy" block
+    # on machines without one and it runs on CPU (slower).
     image: ollama/ollama:0.40.16
     profiles: ["ollama"]
     restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: "30m"   # keep the model loaded between claims
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     volumes:
       - ollama_data:/root/.ollama
     ports:

@@ -88,6 +88,23 @@ wait_healthy() {
 wait_healthy postgres
 wait_healthy n8n
 
+# Local LLM: only when .env selects it
+env_val() { grep -E "^$1=" .env | head -1 | cut -d= -f2- | sed 's/[[:space:]]*#.*$//'; }
+if [ "$(env_val LLM_MODE)" = "ollama" ]; then
+  log "Local LLM (Ollama)"
+  $DC --profile ollama up -d ollama
+  model="$(env_val OLLAMA_MODEL)"
+  for _ in $(seq 1 30); do $DC exec -T ollama ollama list >/dev/null 2>&1 && break; sleep 2; done
+  if $DC exec -T ollama ollama list | awk 'NR>1{print $1}' | grep -qx "$model"; then
+    ok "model $model already present"
+  else
+    echo "    pulling $model (first time only, can take a few minutes)..."
+    $DC exec -T ollama ollama pull "$model" >/dev/null || die "could not pull $model"
+    ok "pulled $model"
+  fi
+  if $DC logs ollama 2>&1 | grep -q 'library=CUDA'; then ok "Ollama is using the NVIDIA GPU"; else ok "Ollama is running on CPU (no GPU detected)"; fi
+fi
+
 # n8n CLI output includes noisy notices; keep it readable.
 n8n_cli() { $DC exec -T n8n n8n "$@" 2>&1 | grep -viE 'migration lock|license SDK|Postgres 16 is outside' || true; }
 
