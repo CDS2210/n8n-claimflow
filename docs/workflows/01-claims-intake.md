@@ -210,7 +210,12 @@ $0.19 per 1,000 claims (USD list price, assuming no reasoning tokens are billed)
 | `cash_or_urgency_language` | "cash", "urgent", "today", "asap", "EFT to a different account"… | 15 |
 
 - `rule_score` = sum of points, capped at 100
-- `final_risk_score` = `0.6 × ai_risk_score + 0.4 × rule_score` (rule score only, if the AI failed)
+- `final_risk_score` = `round(0.6 × ai_risk_score + 0.4 × rule_score)` (rule score only, if the AI failed)
+- Each flag is stored as `{ code, points, detail }`, for example
+  `{ "code": "new_policy", "points": 25, "detail": "incident 10 days after policy start" }`,
+  so a reviewer can see **why** a claim scored what it did.
+- `cash_or_urgency_language` overlaps with the AI's `urgency_language` indicator **on purpose**.
+  If the AI is fooled or fails, the deterministic rule still catches it (defence in depth).
 
 ## Routing
 
@@ -218,10 +223,57 @@ $0.19 per 1,000 claims (USD list price, assuming no reasoning tokens are billed)
 |---|---|---|
 | `manual_review` | AI failed | `pending_manual_review` |
 | `fraud_review` | final ≥ 60, **or** 3+ rule flags, **or** AI flagged `prompt_injection_attempt` | `pending_fraud_review` |
-| `fast_track` | final < 25 **and** amount ≤ R20 000 | `approved_for_assessment` |
+| `fast_track` | final < 25 **and** amount ≤ R20 000 **and no rule flags** | `approved_for_assessment` |
 | `standard` | everything else | `in_standard_queue` |
 
-All weights and thresholds live in one `CONFIG` object, so changing them is a one-line edit.
+The routing step also records `route_reasons` (for example `["final_score 76 >= 60", "4 rule flags"]`)
+in the `routed` audit event. Every decision can be explained from the audit trail alone.
+
+All weights and thresholds live in one `CONFIG` object at the top of `Apply_Rules_Func`:
+
+```javascript
+const CONFIG = {
+  weights: { ai: 0.6, rules: 0.4 },
+  rules: {
+    new_policy:               { points: 25, days: 30 },
+    late_reporting:           { points: 15, days: 30 },
+    near_sum_insured:         { points: 20, ratio: 0.9 },
+    frequent_claimant:        { points: 20, priorClaims: 2 },
+    round_amount:             { points: 10, minAmount: 10000, multipleOf: 1000 },
+    cash_or_urgency_language: { points: 15, pattern: /\b(cash|urgent(ly)?|asap|today|different account)\b/i },
+  },
+  routing: { fraudScore: 60, fraudFlagCount: 3, fastTrackMaxScore: 25, fastTrackMaxAmount: 20000 },
+  hardFraudIndicators: ['prompt_injection_attempt'],
+};
+```
+
+### Expected results for the seeded scenarios (mock mode)
+
+| Scenario | Rule flags | Rule score | AI score | Final | Route |
+|---|---|---|---|---|---|
+| Windscreen, POL-MTR-100001, R4 500 | none | 0 | 10 | 6 | **fast_track** |
+| Home water damage, POL-HOM-100002, R38 000 | round_amount | 10 | 30 | 22 | **standard** (amount > R20 000) |
+| Suspicious theft, POL-MTR-100003, R175 000 | new_policy, near_sum_insured, round_amount, cash_or_urgency | 70 | 80 | 76 | **fraud_review** |
+| Prompt injection, POL-HOM-100009, R15 000 | round_amount | 10 | 60 | 40 | **fraud_review** (hard flag) |
+| Frequent claimant windscreen, POL-MTR-100006, R6 800 | frequent_claimant | 20 | 10 | 14 | **standard** (has a flag) |
+| Simulated LLM failure | any | n/a | null | rules only | **manual_review** |
+
+## Store, respond, route (Chunk D)
+
+1. **Apply_Rules_Func**: flags, scores, route, `route_reasons`, status.
+2. **Insert_Claim_PG**: one statement (CTE) inserts the claim with every AI and rule field,
+   plus three audit events: `received`, `ai_analysed` (status, model, score, problems) and
+   `routed` (route, final score, reasons). It uses `ON CONFLICT (idempotency_key) DO NOTHING`.
+3. **Is_Inserted_If**:
+   - inserted → **202_WebhookR** `{ claim_ref, status: "received", status_url }`
+   - not inserted → **409_WebhookR** `{ error: "duplicate_in_progress" }`. This only happens if two
+     identical requests race past the duplicate check at the same instant. The caller retries
+     and then gets the normal 200 duplicate answer.
+4. **Route_Switch** runs **after** the 202 has been sent. For now each output ends in a
+   placeholder (NoOp) node: `Notify_Approved_TODO`, `Notify_Received_TODO`,
+   `Fraud_Review_TODO`. Stage 4 replaces them with Execute Workflow calls to the Fraud Review
+   and Notifications sub-workflows. The ineligible branch gets a `Notify_Rejected_TODO` too.
+5. The temporary `Ok_WebhookR` is deleted.
 
 ## Why it's shaped like this
 
