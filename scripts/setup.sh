@@ -119,16 +119,37 @@ $DC exec -T n8n node /scripts/encrypt-seed-pii.js
 # ── 6. Workflows ────────────────────────────────────────────────────
 log "Importing and publishing workflows"
 shopt -s nullglob
-for f in workflows/*.json; do
-  id="$(sed -n 's/^  "id": "\([^"]*\)",$/\1/p' "$f" | head -1)"
-  name="$(sed -n 's/^  "name": "\([^"]*\)",$/\1/p' "$f" | head -1)"
-  [ -n "$id" ] || die "no top-level id in $f"
+files=(workflows/*.json)
+wf_id()   { sed -n 's/^  "id": "\([^"]*\)",$/\1/p' "$1" | head -1; }
+wf_name() { sed -n 's/^  "name": "\([^"]*\)",$/\1/p' "$1" | head -1; }
+# Import everything first, then publish: a workflow that calls a sub-workflow must not be
+# published before that sub-workflow exists.
+for f in "${files[@]}"; do
+  id="$(wf_id "$f")"; [ -n "$id" ] || die "no top-level id in $f"
   n8n_cli unpublish:workflow --id="$id" >/dev/null           # republishing requires unpublish first
-  n8n_cli import:workflow --input="/$f" | grep -i "imported" | sed 's/^/    /'
-  if n8n_cli publish:workflow --id="$id" | grep -qi "failed\|cannot publish"; then
-    die "could not publish '$name' ($id). Run: docker compose exec n8n n8n publish:workflow --id=$id"
+  n8n_cli import:workflow --input="/$f" | grep -qi "imported" || die "could not import $f"
+  ok "imported: $(wf_name "$f")"
+done
+# n8n won't publish a workflow until every sub-workflow it calls is published, so publish in
+# passes: anything blocked by an unpublished sub-workflow waits for the next pass.
+pending=("${files[@]}")
+while [ "${#pending[@]}" -gt 0 ]; do
+  blocked=(); last_err=""
+  for f in "${pending[@]}"; do
+    id="$(wf_id "$f")"; name="$(wf_name "$f")"
+    out="$(n8n_cli publish:workflow --id="$id")"
+    if echo "$out" | grep -qi "which is not published"; then
+      blocked+=("$f"); last_err="$out"
+    elif echo "$out" | grep -qi "failed\|cannot publish"; then
+      echo "$out" | sed 's/^/    /'; die "could not publish '$name' ($id)"
+    else
+      ok "published: $name"
+    fi
+  done
+  if [ "${#blocked[@]}" -eq "${#pending[@]}" ]; then
+    echo "$last_err" | sed 's/^/    /'; die "publishing made no progress (missing or circular sub-workflow references)"
   fi
-  ok "published: $name"
+  pending=("${blocked[@]}")
 done
 
 # ── 7. Smoke test ───────────────────────────────────────────────────

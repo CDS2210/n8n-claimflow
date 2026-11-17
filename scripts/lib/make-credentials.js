@@ -23,6 +23,11 @@ const credentials = [
     data: { apiKey: key(env.ANTHROPIC_API_KEY), url: 'https://api.anthropic.com' } },
   { id: 'cfOllamaApi00001', name: 'ClaimFlow Ollama', type: 'ollamaApi',
     data: { baseUrl: 'http://ollama:11434' } },
+  // Mailpit: STARTTLS required (secure:false + STARTTLS upgrade); its certificate is trusted via
+  // NODE_EXTRA_CA_CERTS. Mailpit accepts any login; a real provider would use a real one.
+  { id: 'cfSmtpMailpit001', name: 'ClaimFlow SMTP', type: 'smtp',
+    data: { host: 'mailpit', port: 1025, secure: false, disableStartTls: false,
+      user: 'claimflow', password: 'mailpit-accepts-any-login', hostName: '' } },
 ];
 
 fs.writeFileSync(out, JSON.stringify(credentials), { mode: 0o600 });

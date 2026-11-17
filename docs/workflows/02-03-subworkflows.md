@@ -118,10 +118,12 @@ one email.
 - **Waiting runs are stored.** While it waits, n8n keeps this workflow's execution in its
   database (up to 2 × the timeout). That's why it loads **no name or email**: data minimisation
   matters most exactly where data has to be persisted.
-- **Approval links are bearer links:** anyone holding the link can submit the form, and the
-  reviewer's email is self-declared. Production: put the n8n form path behind SSO (or restrict
-  `/webhook-waiting/*` to the internal network at the proxy) and take reviewer identity from
-  the login, not a form field.
+- **Approval links (verified in the build):** n8n 2.x adds an HMAC `signature` to every
+  `/webhook-waiting/...` link, so a guessed or altered URL is rejected, and the link is
+  **single-use**: a second submission returned 404. They are still *bearer* links, though:
+  whoever holds the email can submit the form, and the reviewer's email is self-declared.
+  Production: put the form path behind SSO (or restrict `/webhook-waiting/*` to the internal
+  network at the proxy) and take reviewer identity from the login, not a form field.
 - Links use `WEBHOOK_URL`, so they're HTTPS through Caddy.
 
 ### Testing (Stage 6)
@@ -130,6 +132,19 @@ extract the form link, submit the form, then assert the claim's status, the audi
 the claimant email.
 
 ---
+
+## Build notes (n8n 2.47.7, verified)
+
+- **Publish order matters.** n8n refuses to publish a workflow that calls an unpublished
+  sub-workflow. `setup.sh` imports everything first, then publishes in passes until all are live
+  (Notifications, then Fraud Review, then Intake).
+- **Form fields** are submitted as `field-0` … `field-3` in the order defined; the answers arrive
+  on the resumed item keyed by field label. `Read_Response_Func` accepts either shape and
+  treats "no Decision" as a timeout.
+- **The review email's message** is rendered with `white-space: pre-line`, so line breaks survive
+  in the HTML version.
+- Successful fraud-review runs are soft-deleted when they finish (`saveDataSuccessExecution: none`);
+  only *waiting* runs are stored, and they hold no claimant contact details.
 
 ## Shared: SMTP credential
 `ClaimFlow SMTP`, created by `setup.sh` like the others: host `mailpit`, port 1025,

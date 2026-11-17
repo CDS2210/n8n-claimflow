@@ -998,48 +998,242 @@
       }
     },
     {
-      "id": "dfc54ecc-ddbb-44a5-9a78-e648e21b5f7a",
-      "name": "Notify_Approved_TODO",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
+      "id": "a3f3e2a8-00ef-4faa-b2dd-ad09e58b8b8c",
+      "name": "Notify_Approved_Exec",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
       "position": [
         4768,
         -192
       ],
-      "parameters": {}
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "cfNotifications1",
+          "cachedResultName": "Claimant Notifications"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "claim_ref": "={{ $('Insert_Claim_PG').item.json.claim_ref }}",
+            "template": "approved_for_assessment",
+            "message": ""
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "claim_ref",
+              "displayName": "claim_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "template",
+              "displayName": "template",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
     },
     {
-      "id": "dd6e31ad-caa9-4dbd-963f-e66570e634df",
-      "name": "Notify_Received_TODO",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
+      "id": "b188815d-39e2-40aa-b04e-bef15f1d04c9",
+      "name": "Notify_Received_Exec",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
       "position": [
         4768,
         0
       ],
-      "parameters": {}
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "cfNotifications1",
+          "cachedResultName": "Claimant Notifications"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "claim_ref": "={{ $('Insert_Claim_PG').item.json.claim_ref }}",
+            "template": "received",
+            "message": ""
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "claim_ref",
+              "displayName": "claim_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "template",
+              "displayName": "template",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
     },
     {
-      "id": "7c454183-0d4a-4549-999d-f06608ccf32a",
-      "name": "Fraud_Review_TODO",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
+      "id": "5700804e-bd4d-409e-b84b-e63417d92fbd",
+      "name": "Fraud_Review_Exec",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
       "position": [
         4768,
         192
       ],
-      "parameters": {}
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "cfFraudReview001",
+          "cachedResultName": "Fraud Review"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "claim_ref": "={{ $('Insert_Claim_PG').item.json.claim_ref }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "claim_ref",
+              "displayName": "claim_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
     },
     {
-      "id": "6165ec44-92c2-4b20-9a91-a8b2b814c4f7",
-      "name": "Notify_Rejected_TODO",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
+      "id": "1288c482-ad93-45b9-a616-22d9e0574c74",
+      "name": "Notify_Rejected_Exec",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
       "position": [
         2496,
         192
       ],
-      "parameters": {}
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "cfNotifications1",
+          "cachedResultName": "Claimant Notifications"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "claim_ref": "={{ $('Insert_Rejected_Claim_PG').item.json.claim_ref }}",
+            "template": "rejected_ineligible",
+            "message": ""
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "claim_ref",
+              "displayName": "claim_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "template",
+              "displayName": "template",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
     }
   ],
   "connections": {
@@ -1530,28 +1724,33 @@
       "main": [
         [
           {
-            "node": "Notify_Approved_TODO",
+            "node": "Notify_Approved_Exec",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Notify_Received_TODO",
+            "node": "Notify_Received_Exec",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Fraud_Review_TODO",
+            "node": "Fraud_Review_Exec",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify_Received_Exec",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Notify_Received_TODO",
+            "node": "Notify_Received_Exec",
             "type": "main",
             "index": 0
           }
@@ -1562,7 +1761,7 @@
       "main": [
         [
           {
-            "node": "Notify_Rejected_TODO",
+            "node": "Notify_Rejected_Exec",
             "type": "main",
             "index": 0
           }

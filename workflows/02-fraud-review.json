@@ -1,0 +1,687 @@
+{
+  "id": "cfFraudReview001",
+  "name": "Fraud Review",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": false
+  },
+  "pinData": {},
+  "meta": {},
+  "tags": [],
+  "nodes": [
+    {
+      "id": "2b48d2a9-9aa9-4789-8cac-70e4c858ed7c",
+      "name": "Review_Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "claim_ref",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "82de8145-8ed9-444d-abb9-90b11c0da9c1",
+      "name": "Load_Review_PG",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT c.claim_ref, c.status, p.product,\n       to_char(p.start_date, 'YYYY-MM-DD') AS policy_start,\n       c.claimed_amount::float8 AS claimed_amount, p.sum_insured::float8 AS sum_insured,\n       to_char(c.incident_date, 'YYYY-MM-DD') AS incident_date,\n       to_char(c.reported_at AT TIME ZONE 'Africa/Johannesburg', 'YYYY-MM-DD HH24:MI') AS reported_at,\n       c.channel, c.description, c.ai_status, c.ai_summary, c.ai_fraud_indicators,\n       c.ai_risk_score, c.rule_score, c.final_risk_score, c.rule_flags,\n       (SELECT e.detail -> 'route_reasons' FROM claim_events e\n         WHERE e.claim_ref = c.claim_ref AND e.event_type = 'routed' ORDER BY e.id DESC LIMIT 1) AS route_reasons\nFROM (SELECT 1) AS one\nLEFT JOIN claims c ON c.claim_ref = $1\nLEFT JOIN policies p ON p.policy_number = c.policy_number;",
+        "options": {
+          "queryReplacement": "={{ [ $json.claim_ref ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "cfPostgresDb0001",
+          "name": "ClaimFlow DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "1725e445-e2aa-4f5a-9215-4ba0846d0477",
+      "name": "Build_Review_Message_Func",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// ── Build review message ─────────────────────────────────────────\n// Everything a reviewer needs to decide, and NO claimant contact details: this\n// execution is stored in n8n's database while it waits for the reviewer.\nconst r = $input.first().json;\nconst claimRef = $('Review_Trigger').first().json.claim_ref;\nif (!r.claim_ref) throw new Error(`Fraud review: claim ${claimRef} not found`);\nif (r.status !== 'pending_fraud_review') {\n  // Already decided (or re-routed) by the time we got here: nothing to ask.\n  return [];\n}\n\nconst money = (n) => 'R ' + Number(n).toFixed(2).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ' ');\nconst policyAgeDays = Math.round(DateTime.fromISO(r.incident_date).diff(DateTime.fromISO(r.policy_start), 'days').days);\nconst pct = Math.round((r.claimed_amount / r.sum_insured) * 100);\nconst flags = (r.rule_flags || []).map((f) => `  - ${f.code}${f.points ? ` (+${f.points})` : ''}: ${f.detail}`);\nconst indicators = (r.ai_fraud_indicators || []).join(', ') || 'none';\nconst reasons = (r.route_reasons || []).map((x) => `  - ${x}`);\n\nconst message = [\n  `Claim ${r.claim_ref} needs a fraud review.`,\n  '',\n  'CLAIM',\n  `  Product:          ${r.product}`,\n  `  Amount claimed:   ${money(r.claimed_amount)} (${pct}% of sum insured ${money(r.sum_insured)})`,\n  `  Incident date:    ${r.incident_date} (${policyAgeDays} days after policy start ${r.policy_start})`,\n  `  Reported:         ${r.reported_at} via ${r.channel}`,\n  '',\n  'CLAIMANT DESCRIPTION (untrusted text)',\n  `  ${String(r.description).replace(/\\s+/g, ' ').slice(0, 1500)}`,\n  '',\n  'WHY IT WAS ROUTED HERE',\n  ...(reasons.length ? reasons : ['  - (no reasons recorded)']),\n  '',\n  `SCORES  final ${r.final_risk_score ?? 'n/a'} | AI ${r.ai_risk_score ?? 'n/a'} (${r.ai_status}) | rules ${r.rule_score ?? 'n/a'}`,\n  `AI SUMMARY  ${r.ai_summary || 'n/a'}`,\n  `AI FRAUD INDICATORS  ${indicators}`,\n  'RULE FLAGS',\n  ...(flags.length ? flags : ['  - none']),\n  '',\n  'Use the button below to record your decision. Internal notes are never shown to the claimant;',\n  'only \"Message to claimant\" is, and only when you request more information.',\n].join('\\n');\n\nreturn [{ json: { claim_ref: r.claim_ref, subject: `[Fraud review] ${r.claim_ref} - ${r.product}, ${money(r.claimed_amount)}`, message } }];"
+      }
+    },
+    {
+      "id": "4215c504-670f-4c97-8e89-40291250170a",
+      "name": "Ask_Fraud_Team",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "resource": "email",
+        "operation": "sendAndWait",
+        "fromEmail": "={{ \"Acme Cover Claims <\" + $env.CLAIMFLOW_FROM_EMAIL + \">\" }}",
+        "toEmail": "={{ $env.CLAIMFLOW_FRAUD_TEAM_EMAIL }}",
+        "subject": "={{ \"\" + $('Build_Review_Message_Func').item.json.subject }}",
+        "message": "={{ $('Build_Review_Message_Func').item.json.message }}",
+        "responseType": "customForm",
+        "defineForm": "fields",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Decision",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Approve for assessment"
+                  },
+                  {
+                    "option": "Reject"
+                  },
+                  {
+                    "option": "Request more information"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Reviewer email",
+              "fieldType": "email",
+              "requiredField": true,
+              "placeholder": "you@acmecover.example"
+            },
+            {
+              "fieldLabel": "Internal notes",
+              "fieldType": "textarea",
+              "requiredField": true,
+              "placeholder": "Not shown to the claimant"
+            },
+            {
+              "fieldLabel": "Message to claimant",
+              "fieldType": "textarea",
+              "placeholder": "Only used for \"Request more information\""
+            }
+          ]
+        },
+        "options": {
+          "limitWaitTime": {
+            "values": {
+              "limitType": "afterTimeInterval",
+              "resumeAmount": "={{ Number($env.CLAIMFLOW_REVIEW_TIMEOUT_MINUTES || 1440) }}",
+              "resumeUnit": "minutes"
+            }
+          },
+          "messageButtonLabel": "Review this claim",
+          "responseFormTitle": "={{ \"Fraud review: \" + $('Build_Review_Message_Func').item.json.claim_ref }}",
+          "responseFormDescription": "Your decision is recorded in the claim audit trail. The first decision submitted for a claim is the one applied.",
+          "responseFormButtonLabel": "Submit decision",
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "cfSmtpMailpit001",
+          "name": "ClaimFlow SMTP"
+        }
+      }
+    },
+    {
+      "id": "eca64f83-0342-4e96-833c-ed5bb4279c12",
+      "name": "Read_Response_Func",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// ── Read reviewer response ───────────────────────────────────────\n// After send-and-wait resumes there are two cases:\n//   * the reviewer submitted the form   -> the answer is on the item\n//   * the wait limit was reached        -> no answer on the item (timeout)\n// This node turns both into one shape: { responded, decision, status, template, ... }.\nconst ROUND = 1;\nconst it = $input.first().json;\nconst claim_ref = $('Build_Review_Message_Func').first().json.claim_ref;\n\n// Form answers are keyed by field label. Look in `data` first, then the item itself.\nconst answers = (it.data && typeof it.data === 'object') ? it.data : it;\nconst get = (label) => {\n  const key = Object.keys(answers).find((k) => k.trim().toLowerCase() === label.toLowerCase());\n  return key === undefined ? undefined : answers[key];\n};\nconst decisionLabel = get('Decision');\n\nconst DECISIONS = {\n  'approve for assessment': { decision: 'approve', status: 'approved_for_assessment', template: 'approved_for_assessment' },\n  'reject': { decision: 'reject', status: 'rejected', template: 'rejected' },\n  'request more information': { decision: 'more_info', status: 'more_info_required', template: 'more_info_required' },\n};\n\nif (!decisionLabel) {\n  return [{ json: { claim_ref, round: ROUND, responded: false } }];\n}\nconst d = DECISIONS[String(decisionLabel).trim().toLowerCase()];\nif (!d) throw new Error(`Fraud review ${claim_ref}: unexpected decision \"${decisionLabel}\"`);\n\nreturn [{\n  json: {\n    claim_ref,\n    round: ROUND,\n    responded: true,\n    ...d,\n    reviewer: String(get('Reviewer email') || 'unknown').trim().toLowerCase().slice(0, 200),\n    internal_notes: String(get('Internal notes') || '').trim().slice(0, 4000),\n    message_to_claimant: d.decision === 'more_info' ? String(get('Message to claimant') || '').trim().slice(0, 2000) : '',\n  },\n}];"
+      }
+    },
+    {
+      "id": "71fa20c5-b2fc-4b87-82b1-265346f2ba2e",
+      "name": "Responded_If",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "c2ad7549-ca7d-486c-ab0b-dbbe6b557b8b",
+              "leftValue": "={{ $json.responded }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "1cc8d934-c715-44e2-9dec-82eee4700e2e",
+      "name": "Log_Escalation_PG",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        1120,
+        224
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO claim_events (claim_ref, event_type, actor, detail)\nVALUES ($1, 'review_escalated', 'system', $2::jsonb) RETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [ $('Build_Review_Message_Func').item.json.claim_ref, JSON.stringify({ round: 1, escalated_to: 'ops', after_minutes: Number($env.CLAIMFLOW_REVIEW_TIMEOUT_MINUTES || 1440) }) ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "cfPostgresDb0001",
+          "name": "ClaimFlow DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "b6714917-6f8c-46c7-8101-82419abd10a5",
+      "name": "Ask_Escalation",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1344,
+        224
+      ],
+      "parameters": {
+        "resource": "email",
+        "operation": "sendAndWait",
+        "fromEmail": "={{ \"Acme Cover Claims <\" + $env.CLAIMFLOW_FROM_EMAIL + \">\" }}",
+        "toEmail": "={{ $env.CLAIMFLOW_OPS_EMAIL }}",
+        "subject": "={{ \"[ESCALATED] \" + $('Build_Review_Message_Func').item.json.subject }}",
+        "message": "={{ $('Build_Review_Message_Func').item.json.message }}",
+        "responseType": "customForm",
+        "defineForm": "fields",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Decision",
+              "fieldType": "dropdown",
+              "requiredField": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Approve for assessment"
+                  },
+                  {
+                    "option": "Reject"
+                  },
+                  {
+                    "option": "Request more information"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Reviewer email",
+              "fieldType": "email",
+              "requiredField": true,
+              "placeholder": "you@acmecover.example"
+            },
+            {
+              "fieldLabel": "Internal notes",
+              "fieldType": "textarea",
+              "requiredField": true,
+              "placeholder": "Not shown to the claimant"
+            },
+            {
+              "fieldLabel": "Message to claimant",
+              "fieldType": "textarea",
+              "placeholder": "Only used for \"Request more information\""
+            }
+          ]
+        },
+        "options": {
+          "limitWaitTime": {
+            "values": {
+              "limitType": "afterTimeInterval",
+              "resumeAmount": "={{ Number($env.CLAIMFLOW_REVIEW_TIMEOUT_MINUTES || 1440) }}",
+              "resumeUnit": "minutes"
+            }
+          },
+          "messageButtonLabel": "Review this claim",
+          "responseFormTitle": "={{ \"Fraud review: \" + $('Build_Review_Message_Func').item.json.claim_ref }}",
+          "responseFormDescription": "Your decision is recorded in the claim audit trail. The first decision submitted for a claim is the one applied.",
+          "responseFormButtonLabel": "Submit decision",
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "cfSmtpMailpit001",
+          "name": "ClaimFlow SMTP"
+        }
+      }
+    },
+    {
+      "id": "5aca1b28-5532-4297-87da-99ca3cf71221",
+      "name": "Read_Escalation_Func",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        224
+      ],
+      "parameters": {
+        "jsCode": "// ── Read reviewer response ───────────────────────────────────────\n// After send-and-wait resumes there are two cases:\n//   * the reviewer submitted the form   -> the answer is on the item\n//   * the wait limit was reached        -> no answer on the item (timeout)\n// This node turns both into one shape: { responded, decision, status, template, ... }.\nconst ROUND = 2;\nconst it = $input.first().json;\nconst claim_ref = $('Build_Review_Message_Func').first().json.claim_ref;\n\n// Form answers are keyed by field label. Look in `data` first, then the item itself.\nconst answers = (it.data && typeof it.data === 'object') ? it.data : it;\nconst get = (label) => {\n  const key = Object.keys(answers).find((k) => k.trim().toLowerCase() === label.toLowerCase());\n  return key === undefined ? undefined : answers[key];\n};\nconst decisionLabel = get('Decision');\n\nconst DECISIONS = {\n  'approve for assessment': { decision: 'approve', status: 'approved_for_assessment', template: 'approved_for_assessment' },\n  'reject': { decision: 'reject', status: 'rejected', template: 'rejected' },\n  'request more information': { decision: 'more_info', status: 'more_info_required', template: 'more_info_required' },\n};\n\nif (!decisionLabel) {\n  return [{ json: { claim_ref, round: ROUND, responded: false } }];\n}\nconst d = DECISIONS[String(decisionLabel).trim().toLowerCase()];\nif (!d) throw new Error(`Fraud review ${claim_ref}: unexpected decision \"${decisionLabel}\"`);\n\nreturn [{\n  json: {\n    claim_ref,\n    round: ROUND,\n    responded: true,\n    ...d,\n    reviewer: String(get('Reviewer email') || 'unknown').trim().toLowerCase().slice(0, 200),\n    internal_notes: String(get('Internal notes') || '').trim().slice(0, 4000),\n    message_to_claimant: d.decision === 'more_info' ? String(get('Message to claimant') || '').trim().slice(0, 2000) : '',\n  },\n}];"
+      }
+    },
+    {
+      "id": "9bb83f1b-30d6-40fc-a549-b0b7b7e2ae72",
+      "name": "Escalation_Responded_If",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1792,
+        224
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "bdb97c72-f029-495b-98d6-99acb93961bc",
+              "leftValue": "={{ $json.responded }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "acc247b3-a877-463d-a5a5-dc6d2cd2f8ed",
+      "name": "Log_Timeout_PG",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        2016,
+        416
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO claim_events (claim_ref, event_type, actor, detail)\nVALUES ($1, 'review_timed_out', 'system', $2::jsonb) RETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [ $('Build_Review_Message_Func').item.json.claim_ref, JSON.stringify({ rounds: 2, note: 'no decision; claim left pending for the SLA report' }) ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "cfPostgresDb0001",
+          "name": "ClaimFlow DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "2cae9622-f0b9-4ed5-8bb8-e4a7e434a1fa",
+      "name": "Apply_Decision_PG",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        2016,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH upd AS (\n  UPDATE claims\n     SET status = $2, reviewer = $3, reviewer_notes = $4, reviewed_at = now()\n   WHERE claim_ref = $1 AND status = 'pending_fraud_review'      -- first decision wins\n  RETURNING claim_ref\n), ev AS (\n  INSERT INTO claim_events (claim_ref, event_type, actor, detail)\n  SELECT claim_ref, 'review_decision', $3,\n         jsonb_build_object('decision', $5::text, 'status', $2::text, 'round', $6::int)\n  FROM upd\n)\nSELECT EXISTS (SELECT 1 FROM upd) AS applied;",
+        "options": {
+          "queryReplacement": "={{ [ $json.claim_ref, $json.status, $json.reviewer, $json.internal_notes, $json.decision, $json.round ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "cfPostgresDb0001",
+          "name": "ClaimFlow DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "97b609a2-3a3c-41f8-b0b2-b62ff8cf1b87",
+      "name": "Applied_If",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        2240,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "1db6d93e-6631-46f5-92bc-d2edcc8b97a0",
+              "leftValue": "={{ $json.applied }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "71c7f084-98a3-4d8e-a8c8-e0ce034c2320",
+      "name": "Notify_Claimant_Exec",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        2464,
+        -96
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "cfNotifications1",
+          "cachedResultName": "Claimant Notifications"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "claim_ref": "={{ $('Apply_Decision_PG').item.json.applied ? $('Read_Response_Func').isExecuted && $('Read_Response_Func').item.json.responded ? $('Read_Response_Func').item.json.claim_ref : $('Read_Escalation_Func').item.json.claim_ref : '' }}",
+            "template": "={{ ($('Read_Escalation_Func').isExecuted && $('Read_Escalation_Func').item.json.responded ? $('Read_Escalation_Func') : $('Read_Response_Func')).item.json.template }}",
+            "message": "={{ ($('Read_Escalation_Func').isExecuted && $('Read_Escalation_Func').item.json.responded ? $('Read_Escalation_Func') : $('Read_Response_Func')).item.json.message_to_claimant }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "claim_ref",
+              "displayName": "claim_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "template",
+              "displayName": "template",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      }
+    },
+    {
+      "id": "6ad787e4-e0c0-4404-802e-eef92740d13a",
+      "name": "Already_Decided",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2464,
+        96
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "37dd793d-90e0-4459-9b29-2e91bd3a9438",
+      "name": "Note 66da",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -360
+      ],
+      "parameters": {
+        "content": "## Fraud Review (human in the loop)\nCalled by intake with `claim_ref`, without waiting.\n\n1. Load the claim (**no name/email**: this run is stored while it waits)\n2. Email the fraud team a form, wait up to `CLAIMFLOW_REVIEW_TIMEOUT_MINUTES`\n3. No answer: escalate to ops with the same form; second timeout leaves it pending (SLA report)\n4. Apply the decision **only if still pending** (first decision wins), then notify the claimant\n\nNothing is ever auto-approved.",
+        "width": 760,
+        "height": 300
+      }
+    }
+  ],
+  "connections": {
+    "Review_Trigger": {
+      "main": [
+        [
+          {
+            "node": "Load_Review_PG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load_Review_PG": {
+      "main": [
+        [
+          {
+            "node": "Build_Review_Message_Func",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build_Review_Message_Func": {
+      "main": [
+        [
+          {
+            "node": "Ask_Fraud_Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask_Fraud_Team": {
+      "main": [
+        [
+          {
+            "node": "Read_Response_Func",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read_Response_Func": {
+      "main": [
+        [
+          {
+            "node": "Responded_If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Responded_If": {
+      "main": [
+        [
+          {
+            "node": "Apply_Decision_PG",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log_Escalation_PG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log_Escalation_PG": {
+      "main": [
+        [
+          {
+            "node": "Ask_Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask_Escalation": {
+      "main": [
+        [
+          {
+            "node": "Read_Escalation_Func",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read_Escalation_Func": {
+      "main": [
+        [
+          {
+            "node": "Escalation_Responded_If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escalation_Responded_If": {
+      "main": [
+        [
+          {
+            "node": "Apply_Decision_PG",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log_Timeout_PG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply_Decision_PG": {
+      "main": [
+        [
+          {
+            "node": "Applied_If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Applied_If": {
+      "main": [
+        [
+          {
+            "node": "Notify_Claimant_Exec",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Already_Decided",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
