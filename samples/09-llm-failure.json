@@ -1,0 +1,14 @@
+{
+  "idempotency_key": "sample-09-llm-failure",
+  "policy_number": "POL-DEV-100007",
+  "channel": "web",
+  "claimant": {
+    "name": "Ayesha Patel",
+    "email": "ayesha.patel@example.com",
+    "phone": "+27 61 555 0107"
+  },
+  "incident_date": "{{DAYS_AGO:2}}",
+  "claimed_amount": 3000,
+  "currency": "ZAR",
+  "description": "Dropped my phone and the screen cracked. [[simulate_llm_failure]]"
+}

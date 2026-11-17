@@ -1,0 +1,14 @@
+{
+  "idempotency_key": "sample-10-detector-failure",
+  "policy_number": "POL-DEV-100010",
+  "channel": "web",
+  "claimant": {
+    "name": "Marco Ferreira",
+    "email": "marco.ferreira@example.com",
+    "phone": "+27 71 555 0110"
+  },
+  "incident_date": "{{DAYS_AGO:2}}",
+  "claimed_amount": 4500,
+  "currency": "ZAR",
+  "description": "Phone screen glass shattered when it fell off the table. [[simulate_detector_failure]]"
+}

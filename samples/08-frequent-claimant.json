@@ -1,0 +1,14 @@
+{
+  "idempotency_key": "sample-08-frequent",
+  "policy_number": "POL-MTR-100006",
+  "channel": "web",
+  "claimant": {
+    "name": "Kabelo Sithole",
+    "email": "kabelo.sithole@example.com",
+    "phone": "+27 76 555 0106"
+  },
+  "incident_date": "{{DAYS_AGO:3}}",
+  "claimed_amount": 6800,
+  "currency": "ZAR",
+  "description": "A stone cracked my windscreen on the N1 near Polokwane."
+}

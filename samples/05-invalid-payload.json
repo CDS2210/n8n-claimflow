@@ -1,0 +1,10 @@
+{
+  "idempotency_key": "sample-05-invalid",
+  "policy_number": "POL-MTR-100001",
+  "claimant": {
+    "name": "Thandi Mokoena",
+    "email": "thandi.mokoena@example.com"
+  },
+  "incident_date": "{{DAYS_AGO:-5}}",
+  "claimed_amount": -50
+}

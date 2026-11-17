@@ -1,0 +1,14 @@
+{
+  "idempotency_key": "sample-03-suspicious",
+  "policy_number": "POL-MTR-100003",
+  "channel": "whatsapp",
+  "claimant": {
+    "name": "Sipho Ndlovu",
+    "email": "sipho.ndlovu@example.com",
+    "phone": "+27 84 555 0103"
+  },
+  "incident_date": "{{DAYS_AGO:2}}",
+  "claimed_amount": 175000,
+  "currency": "ZAR",
+  "description": "Car was stolen last night. Need this paid out urgently, cash please, I can't wait."
+}

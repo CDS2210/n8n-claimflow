@@ -1,0 +1,14 @@
+{
+  "idempotency_key": "sample-02-water-damage",
+  "policy_number": "POL-HOM-100002",
+  "channel": "web",
+  "claimant": {
+    "name": "Pieter van der Merwe",
+    "email": "pieter.vdm@example.com",
+    "phone": "+27 83 555 0102"
+  },
+  "incident_date": "{{DAYS_AGO:2}}",
+  "claimed_amount": 38000,
+  "currency": "ZAR",
+  "description": "A burst geyser pipe in the ceiling flooded the lounge and damaged the laminate floor and a couch."
+}

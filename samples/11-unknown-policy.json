@@ -1,0 +1,14 @@
+{
+  "idempotency_key": "sample-11-unknown-policy",
+  "policy_number": "POL-XXX-999999",
+  "channel": "web",
+  "claimant": {
+    "name": "Sam Unknown",
+    "email": "sam.unknown@example.com",
+    "phone": "+27 82 555 0199"
+  },
+  "incident_date": "{{DAYS_AGO:2}}",
+  "claimed_amount": 500,
+  "currency": "ZAR",
+  "description": "Claim on a policy number that does not exist."
+}

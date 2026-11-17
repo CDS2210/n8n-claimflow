@@ -1,0 +1,14 @@
+{
+  "idempotency_key": "sample-04-lapsed",
+  "policy_number": "POL-TRV-100004",
+  "channel": "web",
+  "claimant": {
+    "name": "Lindiwe Dube",
+    "email": "lindiwe.dube@example.com",
+    "phone": "+27 72 555 0104"
+  },
+  "incident_date": "{{DAYS_AGO:20}}",
+  "claimed_amount": 12000,
+  "currency": "ZAR",
+  "description": "Lost luggage at OR Tambo, the bag contained a laptop, clothes and chargers."
+}

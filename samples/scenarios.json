@@ -1,0 +1,169 @@
+[
+  {
+    "file": "01-windscreen-fast-track.json",
+    "title": "windscreen fast track",
+    "expect": {
+      "http": 202,
+      "route": "fast_track",
+      "status": "approved_for_assessment",
+      "flags": [],
+      "email": "approved for assessment"
+    }
+  },
+  {
+    "file": "02-home-water-damage.json",
+    "title": "home water damage",
+    "expect": {
+      "http": 202,
+      "route": "standard",
+      "status": "in_standard_queue",
+      "flagsInclude": [
+        "round_amount"
+      ],
+      "email": "We've received your claim"
+    }
+  },
+  {
+    "file": "03-suspicious-theft.json",
+    "title": "suspicious theft",
+    "expect": {
+      "http": 202,
+      "route": "fraud_review",
+      "status": "pending_fraud_review",
+      "flagsInclude": [
+        "new_policy",
+        "near_sum_insured",
+        "round_amount",
+        "cash_or_urgency_language"
+      ],
+      "email": "We've received your claim",
+      "fraudEmail": true
+    }
+  },
+  {
+    "file": "04-lapsed-policy.json",
+    "title": "lapsed policy",
+    "expect": {
+      "http": 422,
+      "route": "rejected",
+      "status": "rejected_ineligible",
+      "reasons": [
+        "policy_not_active",
+        "incident_outside_cover"
+      ],
+      "email": "Update on your claim"
+    }
+  },
+  {
+    "file": "05-invalid-payload.json",
+    "title": "invalid payload",
+    "expect": {
+      "http": 400,
+      "errorsInclude": [
+        "is in the future",
+        "greater than 0",
+        "description is required"
+      ]
+    }
+  },
+  {
+    "file": "06-duplicate-submission.json",
+    "title": "duplicate submission",
+    "expect": {
+      "http": 200,
+      "duplicateOf": "02-home-water-damage.json"
+    }
+  },
+  {
+    "file": "07-prompt-injection.json",
+    "title": "prompt injection",
+    "expect": {
+      "http": 202,
+      "route": "fraud_review",
+      "status": "pending_fraud_review",
+      "flagsInclude": [
+        "prompt_injection_pattern",
+        "injection_detector"
+      ],
+      "email": "We've received your claim",
+      "fraudEmail": true
+    }
+  },
+  {
+    "file": "08-frequent-claimant.json",
+    "title": "frequent claimant",
+    "expect": {
+      "http": 202,
+      "route": "standard",
+      "status": "in_standard_queue",
+      "flagsInclude": [
+        "frequent_claimant"
+      ],
+      "email": "We've received your claim"
+    }
+  },
+  {
+    "file": "09-llm-failure.json",
+    "title": "LLM failure",
+    "expect": {
+      "http": 202,
+      "route": "manual_review",
+      "status": "pending_manual_review",
+      "aiStatus": "failed",
+      "email": "We've received your claim"
+    }
+  },
+  {
+    "file": "10-detector-failure.json",
+    "title": "injection detector failure",
+    "expect": {
+      "http": 202,
+      "route": "standard",
+      "status": "in_standard_queue",
+      "flagsInclude": [
+        "injection_check_unavailable"
+      ],
+      "email": "We've received your claim"
+    }
+  },
+  {
+    "file": "11-unknown-policy.json",
+    "title": "unknown policy",
+    "expect": {
+      "http": 422,
+      "route": "rejected",
+      "status": "rejected_ineligible",
+      "reasons": [
+        "policy_not_found"
+      ],
+      "email": "Update on your claim"
+    }
+  },
+  {
+    "file": "12-over-sum-insured.json",
+    "title": "over sum insured",
+    "expect": {
+      "http": 422,
+      "route": "rejected",
+      "status": "rejected_ineligible",
+      "reasons": [
+        "amount_exceeds_sum_insured"
+      ],
+      "email": "Update on your claim"
+    }
+  },
+  {
+    "file": "13-paraphrased-injection.json",
+    "title": "paraphrased injection",
+    "expect": {
+      "http": 202,
+      "route": "fraud_review",
+      "status": "pending_fraud_review",
+      "flagsInclude": [
+        "injection_detector"
+      ],
+      "email": "We've received your claim",
+      "fraudEmail": true
+    }
+  }
+]
