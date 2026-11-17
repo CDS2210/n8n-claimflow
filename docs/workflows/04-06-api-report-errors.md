@@ -148,6 +148,45 @@ flowchart LR
 
 ---
 
+## Internal emails designed for decisions
+
+Ops and fraud-team emails are working tools: a reviewer who can scan the facts in seconds
+decides faster and more consistently. So all internal emails share one design system
+(`scripts/lib/internal-email.js`, copied into the Code nodes like `pii-crypto.js`):
+
+| Principle | How |
+|---|---|
+| Most important first | Banner with the one thing that matters (risk score + deadline, or error + workflow) |
+| Scannable in seconds | Key facts in a two-column table; numbers formatted (R 175 000.00, 97%) |
+| Colour means something | Red = high risk / breach / error, amber = medium / warning, neutral otherwise. Never colour alone: labels too |
+| Explain the system's reasoning | "Why it's here" before the evidence; flags as chips with points |
+| Untrusted text marked | The claimant's description in a separate quoted block labelled *untrusted* |
+| One clear action | A single button, its consequence stated ("the first decision is final") |
+| Works in real mail clients | Table layout + inline styles (Outlook ignores flexbox and stylesheets), plain-text alternative |
+| Safe | Every value HTML-escaped; no claimant contact details |
+
+| Email | Banner | Body |
+|---|---|---|
+| **Fraud review** | Risk score badge, claim ref, product, amount, **respond-by time** | Facts table with an amount-vs-sum-insured bar, why it's here, flag chips, AI view, untrusted description, **Review and decide** button |
+| **Escalation** | Amber "ESCALATED: no decision after 24 h" | Same as fraud review, plus when the original request went out |
+| **Daily Ops Report** | Date + headline KPIs as tiles (received, accepted, avg risk, **SLA breaches** in red if > 0) | Route/status bars, SLA breach table, fraud review outcomes, top indicators and flags, injection defence, AI and system health |
+| **Error alert** | Red: workflow + failing node | Masked message, when, execution id, **Open execution** button |
+
+### Change to Fraud Review: own HTML email + Wait node
+n8n's send-and-wait **HTML-escapes the message** into its own fixed template (verified in
+`sendAndWait/utils.js`), so it can't carry this design. Instead:
+
+```
+Build_Review_Message_Func ─► Send_Review_Email (our HTML, button = $execution.resumeFormUrl)
+                          ─► Wait_For_Review (Wait v1.1, resume on form submitted, time limit)
+```
+- The **form page** starts with an HTML block summarising the claim (risk, key facts, flags),
+  so the reviewer has the evidence in front of them while choosing.
+- `resumeFormUrl` includes a secret resume token, so the link stays unguessable.
+- Escalation uses the same pair (amber email + a second Wait).
+- **To verify during the build:** HTML block fields in the Wait form, a fresh resume token per
+  wait, the output on timeout, and that a used link can't be submitted again.
+
 ## Changes to existing pieces
 - **Status links get the token:** the 202, 200-duplicate and 422 responses, and the claimant
   emails' "Check claim status" button.
