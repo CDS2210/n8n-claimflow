@@ -4,7 +4,9 @@
 // flagged === true AND confidenceScore >= threshold.
 //   docker compose --profile ollama up -d ollama   (model pulled by setup.sh in ollama mode)
 //   node scripts/eval-injection.js [model]
-// Results on 2026-11-15 (llama3.2:3b, RTX 4050): A 0/5, B 4/5, C 3/5, B+C 5/5, 0/4 false alarms.
+// Harness results 2026-11-15 (llama3.2:3b): A 0/5, B 4/5, C 3/5, B+C 5/5, 0/4 false alarms.
+// NOTE: this calls Ollama directly. Inside n8n the same prompt scored lower (Guardrails node 1/5,
+// LLM Chain 3/5); the full pipeline caught 4/5. Treat this harness as a fast screen only.
 // CAVEAT: prompt B was tuned on these samples; held-out attacks live in samples/ (Stage 6).
 const MODEL = process.argv[2] || process.env.OLLAMA_MODEL || 'llama3.2:3b';
 
