@@ -1,0 +1,151 @@
+{
+  "id": "cfErrorHandler01",
+  "name": "Global Error Handler",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "saveManualExecutions": true,
+    "timezone": "Africa/Johannesburg"
+  },
+  "pinData": {},
+  "meta": {},
+  "tags": [],
+  "nodes": [
+    {
+      "id": "ba2258e6-d078-422d-8ce5-fc9fdb85bb75",
+      "name": "Error_Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "bc791244-5ba6-4593-831d-9e288653f334",
+      "name": "Mask_Error_Func",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// ── ClaimFlow internal email design system ────────────────────────\n// Ops / fraud-team emails are working tools, so they follow one layout: a banner with the one\n// thing that matters, scannable facts, colour WITH labels, one clear action. Table layout and\n// inline styles only (Outlook ignores flexbox and <style>). Every value is HTML-escaped.\n// Copied into Code nodes (same pattern as pii-crypto.js).\nconst UI = {\n  brand: '#0b4f6c', text: '#1f2933', muted: '#52606d', faint: '#7b8794', line: '#e4e7eb', panel: '#f5f7fa',\n  tone: {\n    high:   { bg: '#fdecea', fg: '#7a271a', solid: '#b42318', line: '#f5c2bd' },\n    medium: { bg: '#fef3e2', fg: '#7a4a0b', solid: '#b54708', line: '#f7d9a8' },\n    low:    { bg: '#e7f5ee', fg: '#05603a', solid: '#067647', line: '#b7e2cc' },\n    info:   { bg: '#e8f1f8', fg: '#0b4f6c', solid: '#0b4f6c', line: '#c3dbea' },\n  },\n};\n\nconst esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[ch]));\nconst money = (n) => (n === null || n === undefined || n === '' ? 'n/a' : 'R ' + Number(n).toFixed(2).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ' '));\nconst toneForScore = (score) => (score >= 60 ? 'high' : score >= 25 ? 'medium' : 'low');\nconst labelForTone = { high: 'HIGH RISK', medium: 'MEDIUM RISK', low: 'LOW RISK', info: '' };\n\nfunction heading(text) {\n  return `<p style=\"margin:18px 0 6px;font-size:11px;font-weight:bold;letter-spacing:.06em;color:${UI.muted};\">${esc(String(text).toUpperCase())}</p>`;\n}\nfunction para(text, style = '') {\n  return `<p style=\"margin:0 0 10px;font-size:13px;line-height:1.55;color:${UI.text};${style}\">${esc(text)}</p>`;\n}\n// rows: [[label, valueHtmlOrText, {html:true, emphasis:'high'}]]\nfunction factsTable(rows) {\n  return `<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;margin:4px 0 6px;\">${rows.map(([k, v, o = {}]) => {\n    const val = o.html ? v : esc(v);\n    const color = o.emphasis ? UI.tone[o.emphasis].solid : UI.text;\n    return `<tr><td style=\"padding:6px 10px 6px 0;font-size:13px;color:${UI.muted};width:38%;vertical-align:top;border-bottom:1px solid ${UI.line};\">${esc(k)}</td><td style=\"padding:6px 0;font-size:13px;color:${color};font-weight:${o.emphasis ? 'bold' : 'normal'};border-bottom:1px solid ${UI.line};\">${val}</td></tr>`;\n  }).join('')}</table>`;\n}\nfunction bar(pct, tone = 'info') {\n  const w = Math.max(0, Math.min(100, Math.round(pct)));\n  return `<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin-top:4px;\"><tr><td style=\"background:${UI.line};height:6px;border-radius:3px;font-size:0;line-height:0;\"><table role=\"presentation\" width=\"${w}%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td style=\"background:${UI.tone[tone].solid};height:6px;border-radius:3px;font-size:0;line-height:0;\">&nbsp;</td></tr></table></td></tr></table>`;\n}\n// chips: [{text, tone}]\nfunction chips(items) {\n  if (!items.length) return para('None', `color:${UI.muted};`);\n  return `<p style=\"margin:0 0 6px;line-height:2.1;\">${items.map((c) => {\n    const t = UI.tone[c.tone || 'info'];\n    return `<span style=\"display:inline-block;background:${t.bg};color:${t.fg};border:1px solid ${t.line};border-radius:12px;padding:2px 10px;font-size:12px;margin:0 4px 0 0;white-space:nowrap;\">${esc(c.text)}</span>`;\n  }).join('')}</p>`;\n}\nfunction list(items) {\n  return `<ul style=\"margin:0 0 6px 18px;padding:0;\">${items.map((i) => `<li style=\"font-size:13px;line-height:1.6;color:${UI.text};\">${esc(i)}</li>`).join('')}</ul>`;\n}\nfunction quote(text, label) {\n  return `<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:2px 0 6px;\"><tr><td style=\"border-left:3px solid #9aa5b1;background:${UI.panel};padding:10px 12px;font-size:13px;line-height:1.55;font-style:italic;color:${UI.text};\">${esc(text)}</td></tr></table>${label ? `<p style=\"margin:0 0 6px;font-size:11px;color:${UI.faint};\">${esc(label)}</p>` : ''}`;\n}\nfunction button(href, label, note) {\n  return `<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:20px 0 4px;\"><tr><td align=\"center\"><a href=\"${esc(href)}\" style=\"display:inline-block;background:${UI.brand};color:#ffffff;text-decoration:none;padding:12px 26px;border-radius:6px;font-size:14px;font-weight:bold;\">${esc(label)}</a></td></tr></table>${note ? `<p style=\"margin:6px 0 0;text-align:center;font-size:12px;color:${UI.muted};\">${esc(note)}</p>` : ''}`;\n}\n// tiles: [{label, value, tone}]\nfunction kpiTiles(tiles) {\n  const w = Math.floor(100 / tiles.length);\n  return `<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"6\" style=\"margin:0 -6px 4px;\"><tr>${tiles.map((t) => {\n    const tone = UI.tone[t.tone || 'info'];\n    return `<td width=\"${w}%\" style=\"background:${tone.bg};border:1px solid ${tone.line};border-radius:8px;padding:10px 12px;vertical-align:top;\"><div style=\"font-size:22px;font-weight:bold;color:${tone.fg};line-height:1.1;\">${esc(t.value)}</div><div style=\"font-size:11px;color:${tone.fg};margin-top:4px;\">${esc(t.label)}</div></td>`;\n  }).join('')}</tr></table>`;\n}\n// rows: [[cells...]], headers: [..]\nfunction dataTable(headers, rows, emptyText = 'None') {\n  if (!rows.length) return para(emptyText, `color:${UI.muted};`);\n  return `<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;margin:2px 0 6px;\"><tr>${headers.map((h) => `<td style=\"padding:6px 8px;font-size:11px;font-weight:bold;color:${UI.muted};background:${UI.panel};border-bottom:1px solid ${UI.line};\">${esc(h)}</td>`).join('')}</tr>${rows.map((r) => `<tr>${r.map((c) => `<td style=\"padding:6px 8px;font-size:13px;color:${UI.text};border-bottom:1px solid ${UI.line};\">${esc(c)}</td>`).join('')}</tr>`).join('')}</table>`;\n}\n// banner: {tone, badge:{value,label}?, title, subtitle}\nfunction banner(b) {\n  const t = UI.tone[b.tone || 'info'];\n  const badge = b.badge ? `<td width=\"76\" style=\"padding-right:14px;vertical-align:middle;\"><table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"center\" style=\"background:${t.solid};color:#ffffff;border-radius:8px;padding:8px 10px;min-width:56px;\"><div style=\"font-size:22px;font-weight:bold;line-height:1;\">${esc(b.badge.value)}</div><div style=\"font-size:10px;margin-top:3px;\">${esc(b.badge.label)}</div></td></tr></table></td>` : '';\n  return `<tr><td style=\"background:${t.bg};border-bottom:1px solid ${t.line};padding:14px 22px;\"><table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr>${badge}<td style=\"vertical-align:middle;\"><div style=\"font-size:16px;font-weight:bold;color:${t.fg};\">${esc(b.title)}</div>${b.subtitle ? `<div style=\"font-size:13px;color:${t.fg};margin-top:3px;\">${esc(b.subtitle)}</div>` : ''}</td></tr></table></td></tr>`;\n}\n// Full email. bodyHtml is already-built (escaped) component HTML.\nfunction layout({ product = 'Acme Cover', section, bannerSpec, bodyHtml, footer }) {\n  return `<!DOCTYPE html><html><body style=\"margin:0;padding:0;background:#eef1f5;font-family:Arial,Helvetica,sans-serif;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#eef1f5;padding:20px 0;\"><tr><td align=\"center\">\n<table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:600px;background:#ffffff;border:1px solid #d9dee5;border-radius:10px;overflow:hidden;\">\n<tr><td style=\"background:${UI.brand};padding:14px 22px;\"><table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td style=\"color:#ffffff;font-size:16px;font-weight:bold;\">${esc(product)} &middot; ${esc(section)}</td><td align=\"right\" style=\"color:#cfe0ea;font-size:12px;\">Internal: claims staff only</td></tr></table></td></tr>\n${bannerSpec ? banner(bannerSpec) : ''}\n<tr><td style=\"padding:8px 22px 20px;\">${bodyHtml}</td></tr>\n<tr><td style=\"background:#f8fafc;border-top:1px solid ${UI.line};padding:10px 22px;font-size:11px;color:${UI.faint};\">${esc(footer || 'Generated by ClaimFlow. Contains no claimant contact details by design.')}</td></tr>\n</table></td></tr></table></body></html>`;\n}\n\n// ── Mask and shape the error (uses internal-email.js) ────────────\n// The Error Trigger gets no item data, but error messages and descriptions can include SQL\n// and values. Everything is masked before it is stored or emailed.\nconst e = $input.first().json;\nconst exe = e.execution || {};\nconst err = exe.error || {};\nconst mask = (s) => String(s ?? '')\n  .replace(/v\\d+:[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+/g, '[ciphertext]')\n  .replace(/([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\\.[A-Za-z]{2,})/g, '$1***@$2')\n  .replace(/\\b\\d{13}\\b/g, '[id-number]')\n  .replace(/\\b(?:\\d[ -]?){13,19}\\b/g, '[card-number]')\n  .replace(/(?:\\+27|\\b0)[\\s-]?\\d{2}[\\s-]?\\d{3}[\\s-]?(\\d{4})\\b/g, '+27 *** ***$1');\nconst cut = (s, n) => (s.length > n ? s.slice(0, n) + '...[truncated]' : s);\n\nconst workflow = (e.workflow && e.workflow.name) || 'unknown workflow';\nconst node = (err.node && err.node.name) || exe.lastNodeExecuted || null;\nconst message = cut(mask(err.message || 'Unknown error'), 1000);\nconst description = cut(mask(err.description || ''), 2000);\nconst stack = cut(mask(err.stack || ''), 2000);\nconst executionId = String(exe.id || '');\nconst executionUrl = exe.url || '';\nconst when = $now.setZone('Africa/Johannesburg');\n\nconst body = [\n  factsTable([\n    ['When', when.toFormat('ccc d LLL yyyy, HH:mm:ss')],\n    ['Workflow', workflow],\n    ['Failing node', node || 'unknown'],\n    ['Execution', `${executionId || 'n/a'} (${exe.mode || 'n/a'})${exe.retryOf ? ', retry of ' + exe.retryOf : ''}`],\n  ]),\n  heading('Error'),\n  quote(message),\n  description ? heading('Details') + quote(cut(description, 600)) : '',\n  executionUrl ? button(executionUrl, 'Open execution in n8n', 'Requires editor access. Personal information in this alert is masked.') : '',\n].join('\\n');\nconst html = layout({ section: 'Workflow error', bannerSpec: { tone: 'high', title: `${workflow} failed`, subtitle: `at ${node || 'unknown node'} · ${when.toFormat('HH:mm')}` }, bodyHtml: body,\n  footer: 'Logged to workflow_errors. Emails, phone numbers, ID/card numbers and ciphertext are masked.' });\nconst text = [`${workflow} failed at ${node || 'unknown node'}`, `When: ${when.toISO()}`, `Execution: ${executionId}`, '', message,\n  description ? `\\n${description}` : '', executionUrl ? `\\nOpen: ${executionUrl}` : ''].join('\\n');\n\nreturn [{ json: {\n  workflow, node, execution_id: executionId, message,\n  payload: { workflow_id: e.workflow && e.workflow.id, mode: exe.mode, retry_of: exe.retryOf || null, description, stack, execution_url: executionUrl },\n  subject: `[ClaimFlow error] ${workflow} - ${node || 'unknown node'}`, html, text,\n} }];"
+      }
+    },
+    {
+      "id": "2e878263-f7a4-4b76-b987-752220dcff39",
+      "name": "Log_Error_PG",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO workflow_errors (workflow, node, execution_id, message, payload)\nVALUES ($1, $2, $3, $4, $5::jsonb) RETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [ $json.workflow, $json.node, $json.execution_id, $json.message, JSON.stringify($json.payload) ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "cfPostgresDb0001",
+          "name": "ClaimFlow DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "b771735d-f808-441b-9282-83a50269d1e3",
+      "name": "Alert_Ops_Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "resource": "email",
+        "operation": "send",
+        "fromEmail": "={{ \"ClaimFlow <\" + $env.CLAIMFLOW_FROM_EMAIL + \">\" }}",
+        "toEmail": "={{ $env.CLAIMFLOW_OPS_EMAIL }}",
+        "subject": "={{ $('Mask_Error_Func').item.json.subject }}",
+        "emailFormat": "both",
+        "text": "={{ $('Mask_Error_Func').item.json.text }}",
+        "html": "={{ $('Mask_Error_Func').item.json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "cfSmtpMailpit001",
+          "name": "ClaimFlow SMTP"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "29cac268-7127-4c31-ba52-432e564c4c15",
+      "name": "Note 9f27e0",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -360
+      ],
+      "parameters": {
+        "content": "## Global Error Handler\nError workflow for **all** other workflows (n8n never runs it for its own failures, so no loops).\n\n- Masks emails, SA phones, SA ID / card numbers and ciphertext before storing or emailing\n- Logs to `workflow_errors` first; the alert email **continues on error**, and so does the log, so one outage can't hide the other",
+        "width": 660,
+        "height": 250
+      }
+    }
+  ],
+  "connections": {
+    "Error_Trigger": {
+      "main": [
+        [
+          {
+            "node": "Mask_Error_Func",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mask_Error_Func": {
+      "main": [
+        [
+          {
+            "node": "Log_Error_PG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log_Error_PG": {
+      "main": [
+        [
+          {
+            "node": "Alert_Ops_Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

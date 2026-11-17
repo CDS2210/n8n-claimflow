@@ -187,6 +187,30 @@ Build_Review_Message_Func ─► Send_Review_Email (our HTML, button = $executio
 - **To verify during the build:** HTML block fields in the Wait form, a fresh resume token per
   wait, the output on timeout, and that a used link can't be submitted again.
 
+## Build notes and test results (n8n 2.47.7, 2026-11-17)
+
+| Test | Result |
+|---|---|
+| Unit tests (links, status mapping, masking, review/report/alert emails; stats SQL on live data) | 27/27 |
+| Status API: signed link → 200; tampered, missing, other-claim token, unknown claim → **identical 404**; malformed ref → 400 | pass |
+| Fraud-review claim shown publicly as `under_review` | pass |
+| New review email (own HTML) → Wait form with claim summary → "Request more information" | status, audit and claimant email correct; **internal notes not leaked**; reused link → 404 |
+| 1-minute timeout with the Wait node | escalated at 61 s (amber email to ops), timed out at 121 s, claim still pending |
+| Daily report on demand (`scripts/run-report.sh`) | delivered to ops from live data |
+| SMTP outage (Mailpit stopped) | claim still accepted (202); error logged with no PI; handler's own alert failed and continued, as designed |
+| Data-integrity failure (claim with no email) | error logged **and** red alert email to ops |
+
+Verified behaviours worth knowing:
+- **One form link per execution:** n8n signs `/form-waiting/<execution>`, so the original review
+  email and the escalation email carry the same link. During escalation both the fraud team and
+  ops can respond; the first decision wins (enforced by `Apply_Decision_PG`).
+- **HTML form blocks are posted back:** the summary block becomes a hidden field whose content is
+  returned with the answers. Harmless here (no PI), and `Read_Response_Func` ignores it.
+- **Error workflows run for production and sub-workflow executions,** not for manual editor runs.
+- **Known gap:** when SMTP is down, the claimant email for that event is lost (the error is
+  logged and alerted, but not retried). Production next step: a transactional outbox table plus
+  a retry worker.
+
 ## Changes to existing pieces
 - **Status links get the token:** the 202, 200-duplicate and 422 responses, and the claimant
   emails' "Check claim status" button.

@@ -1,0 +1,367 @@
+{
+  "id": "cfStatusApi00001",
+  "name": "Claim Status API",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": false,
+    "timezone": "Africa/Johannesburg",
+    "errorWorkflow": "cfErrorHandler01"
+  },
+  "pinData": {},
+  "meta": {},
+  "tags": [],
+  "nodes": [
+    {
+      "id": "9f5cd445-f10d-4d86-b3ea-3eef0c9cdf24",
+      "name": "Status_Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "fce66b74-2f2e-400b-b51a-d4f759a518fb",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "claims/status",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "0ce90876-778f-4c63-a51f-8603ad654141",
+      "name": "Validate_Request_Func",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// ── ClaimFlow signed status links ─────────────────────────────────\n// Claim references are sequential, so the Status API needs proof the caller was given the\n// link: t = first 32 hex chars of HMAC-SHA256(CLAIMFLOW_STATUS_LINK_KEY, claim_ref).\n// Copied into the Code nodes that build or check links (same pattern as pii-crypto.js).\nconst linkCrypto = require('crypto');\n\nfunction statusToken(claimRef, env) {\n  const key = Buffer.from(String(env.CLAIMFLOW_STATUS_LINK_KEY || ''), 'base64');\n  if (key.length < 32) throw new Error('CLAIMFLOW_STATUS_LINK_KEY must be at least 32 random bytes, base64-encoded');\n  return linkCrypto.createHmac('sha256', key).update(`status:${claimRef}`, 'utf8').digest('hex').slice(0, 32);\n}\n\nfunction statusUrl(claimRef, env) {\n  return `${env.WEBHOOK_URL}webhook/claims/status?ref=${encodeURIComponent(claimRef)}&t=${statusToken(claimRef, env)}`;\n}\n\n// Constant-time comparison so response timing doesn't reveal how much of a token matched.\nfunction statusTokenValid(claimRef, token, env) {\n  const expected = Buffer.from(statusToken(claimRef, env), 'utf8');\n  const given = Buffer.from(String(token || ''), 'utf8');\n  return given.length === expected.length && linkCrypto.timingSafeEqual(given, expected);\n}\n\n// ── Validate status request ──────────────────────────────────────\n// A wrong or missing token gets the same answer as an unknown claim (404), so the API never\n// confirms that a reference exists. The token check is constant-time (links.js).\nconst q = $input.first().json.query || {};\nconst ref = String(q.ref || '').trim().toUpperCase();\nif (!/^CLM-\\d{4}-\\d{6}$/.test(ref)) {\n  return [{ json: { result: 'bad_request', error: 'bad_request', message: 'ref is required and must look like CLM-YYYY-NNNNNN' } }];\n}\nif (!statusTokenValid(ref, q.t, $env)) return [{ json: { result: 'not_found', ref } }];\nreturn [{ json: { result: 'ok', ref } }];"
+      }
+    },
+    {
+      "id": "94f43a7d-ab9a-42f8-b384-02f28ceae7dd",
+      "name": "Request_Switch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.5,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "bbef4e81-3748-4555-bd1e-ef9a72804aa7",
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "ok",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ok"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "a7dda020-41b0-440b-8765-ff373f46deb4",
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "bad_request",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "bad_request"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 4
+                },
+                "conditions": [
+                  {
+                    "id": "4d8f9817-7969-4ef9-832c-c81ff9e1b1ad",
+                    "leftValue": "={{ $json.result }}",
+                    "rightValue": "not_found",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "not_found"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3ba7a8cf-66c4-43c8-8533-9e6a29733460",
+      "name": "Load_Status_PG",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        672,
+        -96
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT v.claim_ref, v.status, v.product, to_char(v.incident_date, 'YYYY-MM-DD') AS incident_date,\n       v.reported_at, v.updated_at, v.timeline\nFROM (SELECT 1) AS one\nLEFT JOIN claim_status_public v ON v.claim_ref = $1;",
+        "options": {
+          "queryReplacement": "={{ [ $json.ref ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "cfPostgresDb0001",
+          "name": "ClaimFlow DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "c66a64a8-431c-4265-9ce1-e7e9982fc33f",
+      "name": "Map_Status_Func",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        -96
+      ],
+      "parameters": {
+        "jsCode": "// ── Map to the public view of a claim ────────────────────────────\n// Internal statuses and events become neutral public ones: a claim under fraud review looks\n// exactly like one in the normal queue (no tipping off). No scores, flags or names.\nconst r = $input.first().json;\nif (!r.claim_ref) return [{ json: { found: false } }];\nconst STATUS = {\n  received: ['received', 'Received'],\n  in_standard_queue: ['under_review', 'Under review'],\n  pending_fraud_review: ['under_review', 'Under review'],\n  pending_manual_review: ['under_review', 'Under review'],\n  approved_for_assessment: ['approved_for_assessment', 'Approved for assessment'],\n  more_info_required: ['more_info_required', 'More information needed'],\n  rejected: ['not_accepted', 'Not accepted'],\n  rejected_ineligible: ['not_accepted', 'Not accepted'],\n  closed: ['closed', 'Closed'],\n};\nconst EVENT = {\n  received: ['received', 'Claim received'], routed: ['assessed', 'Claim assessed'],\n  review_decision: ['review_completed', 'Review completed'], notification_sent: ['email_sent', 'We emailed you'],\n  rejected_ineligible: ['not_accepted', 'Claim not accepted'], status_changed: ['status_updated', 'Status updated'],\n};\nconst iso = (v) => (v ? DateTime.fromJSDate(new Date(v)).setZone('Africa/Johannesburg').toISO({ suppressMilliseconds: true }) : null);\nconst [status, status_label] = STATUS[r.status] || ['under_review', 'Under review'];\nreturn [{ json: {\n  found: true,\n  response: {\n    claim_ref: r.claim_ref, status, status_label, product: r.product, incident_date: r.incident_date,\n    submitted_at: iso(r.reported_at), last_updated: iso(r.updated_at),\n    timeline: (r.timeline || []).filter((t) => EVENT[t.event]).map((t) => ({ event: EVENT[t.event][0], label: EVENT[t.event][1], at: iso(t.at) })),\n  },\n} }];"
+      }
+    },
+    {
+      "id": "27b2b625-651c-4a99-9cfb-5641030a2cb6",
+      "name": "Found_If",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1120,
+        -96
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "6d07c20d-7c4c-48bf-8d1b-5ad5511c7423",
+              "leftValue": "={{ $json.found }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "827803c1-38db-4efd-9ca8-2330d1e6f380",
+      "name": "200_WebhookR",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1344,
+        -192
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "efbe37c6-85a1-4157-8f9b-4a4b8a566d2c",
+      "name": "404_WebhookR",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1344,
+        96
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"not_found\", \"message\": \"No claim found for that reference and link.\" } }}",
+        "options": {
+          "responseCode": 404
+        }
+      }
+    },
+    {
+      "id": "b4694023-f007-42bb-8e2d-e137cc377607",
+      "name": "400_WebhookR",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        672,
+        160
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": $json.error, \"message\": $json.message } }}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "5c6d0720-bf92-4988-a2dc-01a734d09403",
+      "name": "Note e31761",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -380
+      ],
+      "parameters": {
+        "content": "## Claim Status API\n`GET /webhook/claims/status?ref=CLM-…&t=<token>`\n\n- `t` = HMAC of the ref (signed link from our emails / 202). Wrong or missing token → **same 404** as an unknown claim, so refs can't be enumerated\n- Reads only the `claim_status_public` view\n- Internal statuses mapped to public ones: fraud review looks like \"Under review\" (no tipping off)",
+        "width": 700,
+        "height": 280
+      }
+    }
+  ],
+  "connections": {
+    "Status_Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate_Request_Func",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate_Request_Func": {
+      "main": [
+        [
+          {
+            "node": "Request_Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request_Switch": {
+      "main": [
+        [
+          {
+            "node": "Load_Status_PG",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "400_WebhookR",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "404_WebhookR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load_Status_PG": {
+      "main": [
+        [
+          {
+            "node": "Map_Status_Func",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map_Status_Func": {
+      "main": [
+        [
+          {
+            "node": "Found_If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Found_If": {
+      "main": [
+        [
+          {
+            "node": "200_WebhookR",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "404_WebhookR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

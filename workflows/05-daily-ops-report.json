@@ -1,0 +1,185 @@
+{
+  "id": "cfDailyReport001",
+  "name": "Daily Ops Report",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "saveDataErrorExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": false,
+    "timezone": "Africa/Johannesburg",
+    "errorWorkflow": "cfErrorHandler01"
+  },
+  "pinData": {},
+  "meta": {},
+  "tags": [],
+  "nodes": [
+    {
+      "id": "b9dabc6a-40bd-46b7-8bf1-d7bcda476c35",
+      "name": "Every_Day_0700",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        -96
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0
+            }
+          ]
+        },
+        "misfirePolicy": "coalesce"
+      }
+    },
+    {
+      "id": "6d32eef0-1c99-4fc6-be14-3175c9e9e58b",
+      "name": "Run_Now",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        96
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "1e65f7c9-45d8-41eb-a19d-1ffcddbcb3f8",
+      "name": "Daily_Stats_PG",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.8,
+      "position": [
+        256,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- One query, one consistent snapshot, returned as a single JSON object.\nWITH win AS (SELECT now() - interval '24 hours' AS since),\nc24 AS (SELECT c.* FROM claims c, win WHERE c.created_at >= win.since),\nev24 AS (SELECT e.* FROM claim_events e, win WHERE e.created_at >= win.since)\nSELECT jsonb_build_object(\n  'generated_at', now(),\n  'window_start', (SELECT since FROM win),\n  'sla_hours', $1::int,\n  'received', (SELECT count(*) FROM c24),\n  'accepted', (SELECT count(*) FROM c24 WHERE status <> 'rejected_ineligible'),\n  'rejected_ineligible', (SELECT count(*) FROM c24 WHERE status = 'rejected_ineligible'),\n  'total_claimed', (SELECT coalesce(sum(claimed_amount), 0)::float8 FROM c24),\n  'avg_final_risk', (SELECT round(avg(final_risk_score))::int FROM c24 WHERE final_risk_score IS NOT NULL),\n  'by_route', (SELECT coalesce(jsonb_object_agg(route, n), '{}'::jsonb)\n                 FROM (SELECT coalesce(route, 'none') AS route, count(*) AS n FROM c24 GROUP BY 1) x),\n  'open_by_status', (SELECT coalesce(jsonb_object_agg(status, n), '{}'::jsonb)\n                 FROM (SELECT status, count(*) AS n FROM claims\n                        WHERE status IN ('in_standard_queue','pending_fraud_review','pending_manual_review','more_info_required')\n                        GROUP BY 1) x),\n  'sla_breaches', (SELECT coalesce(jsonb_agg(jsonb_build_object('claim_ref', claim_ref, 'status', status, 'age_hours', age) ORDER BY age DESC), '[]'::jsonb)\n                 FROM (SELECT claim_ref, status, floor(extract(epoch FROM now() - reported_at) / 3600)::int AS age\n                         FROM claims\n                        WHERE status IN ('in_standard_queue','pending_fraud_review','pending_manual_review','more_info_required')\n                          AND reported_at < now() - make_interval(hours => $1::int)) s),\n  'review', jsonb_build_object(\n      'decisions', (SELECT coalesce(jsonb_object_agg(d, n), '{}'::jsonb)\n                      FROM (SELECT detail->>'decision' AS d, count(*) AS n FROM ev24 WHERE event_type = 'review_decision' GROUP BY 1) x),\n      'escalated', (SELECT count(*) FROM ev24 WHERE event_type = 'review_escalated'),\n      'timed_out', (SELECT count(*) FROM ev24 WHERE event_type = 'review_timed_out'),\n      'pending',   (SELECT count(*) FROM claims WHERE status = 'pending_fraud_review')),\n  'top_indicators', (SELECT coalesce(jsonb_agg(jsonb_build_object('name', ind, 'n', n) ORDER BY n DESC, ind), '[]'::jsonb)\n                 FROM (SELECT ind, count(*) AS n FROM c24, jsonb_array_elements_text(ai_fraud_indicators) ind\n                        GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 5) x),\n  'top_flags', (SELECT coalesce(jsonb_agg(jsonb_build_object('name', code, 'n', n) ORDER BY n DESC, code), '[]'::jsonb)\n                 FROM (SELECT f->>'code' AS code, count(*) AS n FROM c24, jsonb_array_elements(rule_flags) f\n                        GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 6) x),\n  'injection', jsonb_build_object(\n      'hard_flagged', (SELECT count(*) FROM c24 WHERE rule_flags @> '[{\"code\":\"prompt_injection_pattern\"}]'\n                                                 OR rule_flags @> '[{\"code\":\"injection_detector\"}]'),\n      'detector_unavailable', (SELECT count(*) FROM c24 WHERE rule_flags @> '[{\"code\":\"injection_check_unavailable\"}]')),\n  'ai', jsonb_build_object(\n      'ok', (SELECT count(*) FROM c24 WHERE ai_status = 'ok'),\n      'failed', (SELECT count(*) FROM c24 WHERE ai_status = 'failed'),\n      'models', (SELECT coalesce(jsonb_object_agg(m, n), '{}'::jsonb)\n                   FROM (SELECT ai_model AS m, count(*) AS n FROM c24 WHERE ai_model IS NOT NULL GROUP BY 1) x)),\n  'notifications_sent', (SELECT count(*) FROM ev24 WHERE event_type = 'notification_sent'),\n  'errors', (SELECT jsonb_build_object('count', count(*),\n                 'recent', coalesce(jsonb_agg(jsonb_build_object('workflow', workflow, 'node', node, 'at', created_at) ORDER BY created_at DESC)\n                                    FILTER (WHERE rn <= 5), '[]'::jsonb))\n               FROM (SELECT w.*, row_number() OVER (ORDER BY w.created_at DESC) AS rn\n                       FROM workflow_errors w, win WHERE w.created_at >= win.since) w)\n) AS report;",
+        "options": {
+          "queryReplacement": "={{ [ Number($env.CLAIMFLOW_SLA_HOURS || 48) ] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "cfPostgresDb0001",
+          "name": "ClaimFlow DB"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "e3a90a8c-1103-4d2d-ac6d-232ec178b405",
+      "name": "Build_Report_Func",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        512,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// ── ClaimFlow internal email design system ────────────────────────\n// Ops / fraud-team emails are working tools, so they follow one layout: a banner with the one\n// thing that matters, scannable facts, colour WITH labels, one clear action. Table layout and\n// inline styles only (Outlook ignores flexbox and <style>). Every value is HTML-escaped.\n// Copied into Code nodes (same pattern as pii-crypto.js).\nconst UI = {\n  brand: '#0b4f6c', text: '#1f2933', muted: '#52606d', faint: '#7b8794', line: '#e4e7eb', panel: '#f5f7fa',\n  tone: {\n    high:   { bg: '#fdecea', fg: '#7a271a', solid: '#b42318', line: '#f5c2bd' },\n    medium: { bg: '#fef3e2', fg: '#7a4a0b', solid: '#b54708', line: '#f7d9a8' },\n    low:    { bg: '#e7f5ee', fg: '#05603a', solid: '#067647', line: '#b7e2cc' },\n    info:   { bg: '#e8f1f8', fg: '#0b4f6c', solid: '#0b4f6c', line: '#c3dbea' },\n  },\n};\n\nconst esc = (s) => String(s ?? '').replace(/[&<>\"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[ch]));\nconst money = (n) => (n === null || n === undefined || n === '' ? 'n/a' : 'R ' + Number(n).toFixed(2).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ' '));\nconst toneForScore = (score) => (score >= 60 ? 'high' : score >= 25 ? 'medium' : 'low');\nconst labelForTone = { high: 'HIGH RISK', medium: 'MEDIUM RISK', low: 'LOW RISK', info: '' };\n\nfunction heading(text) {\n  return `<p style=\"margin:18px 0 6px;font-size:11px;font-weight:bold;letter-spacing:.06em;color:${UI.muted};\">${esc(String(text).toUpperCase())}</p>`;\n}\nfunction para(text, style = '') {\n  return `<p style=\"margin:0 0 10px;font-size:13px;line-height:1.55;color:${UI.text};${style}\">${esc(text)}</p>`;\n}\n// rows: [[label, valueHtmlOrText, {html:true, emphasis:'high'}]]\nfunction factsTable(rows) {\n  return `<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;margin:4px 0 6px;\">${rows.map(([k, v, o = {}]) => {\n    const val = o.html ? v : esc(v);\n    const color = o.emphasis ? UI.tone[o.emphasis].solid : UI.text;\n    return `<tr><td style=\"padding:6px 10px 6px 0;font-size:13px;color:${UI.muted};width:38%;vertical-align:top;border-bottom:1px solid ${UI.line};\">${esc(k)}</td><td style=\"padding:6px 0;font-size:13px;color:${color};font-weight:${o.emphasis ? 'bold' : 'normal'};border-bottom:1px solid ${UI.line};\">${val}</td></tr>`;\n  }).join('')}</table>`;\n}\nfunction bar(pct, tone = 'info') {\n  const w = Math.max(0, Math.min(100, Math.round(pct)));\n  return `<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin-top:4px;\"><tr><td style=\"background:${UI.line};height:6px;border-radius:3px;font-size:0;line-height:0;\"><table role=\"presentation\" width=\"${w}%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td style=\"background:${UI.tone[tone].solid};height:6px;border-radius:3px;font-size:0;line-height:0;\">&nbsp;</td></tr></table></td></tr></table>`;\n}\n// chips: [{text, tone}]\nfunction chips(items) {\n  if (!items.length) return para('None', `color:${UI.muted};`);\n  return `<p style=\"margin:0 0 6px;line-height:2.1;\">${items.map((c) => {\n    const t = UI.tone[c.tone || 'info'];\n    return `<span style=\"display:inline-block;background:${t.bg};color:${t.fg};border:1px solid ${t.line};border-radius:12px;padding:2px 10px;font-size:12px;margin:0 4px 0 0;white-space:nowrap;\">${esc(c.text)}</span>`;\n  }).join('')}</p>`;\n}\nfunction list(items) {\n  return `<ul style=\"margin:0 0 6px 18px;padding:0;\">${items.map((i) => `<li style=\"font-size:13px;line-height:1.6;color:${UI.text};\">${esc(i)}</li>`).join('')}</ul>`;\n}\nfunction quote(text, label) {\n  return `<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:2px 0 6px;\"><tr><td style=\"border-left:3px solid #9aa5b1;background:${UI.panel};padding:10px 12px;font-size:13px;line-height:1.55;font-style:italic;color:${UI.text};\">${esc(text)}</td></tr></table>${label ? `<p style=\"margin:0 0 6px;font-size:11px;color:${UI.faint};\">${esc(label)}</p>` : ''}`;\n}\nfunction button(href, label, note) {\n  return `<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:20px 0 4px;\"><tr><td align=\"center\"><a href=\"${esc(href)}\" style=\"display:inline-block;background:${UI.brand};color:#ffffff;text-decoration:none;padding:12px 26px;border-radius:6px;font-size:14px;font-weight:bold;\">${esc(label)}</a></td></tr></table>${note ? `<p style=\"margin:6px 0 0;text-align:center;font-size:12px;color:${UI.muted};\">${esc(note)}</p>` : ''}`;\n}\n// tiles: [{label, value, tone}]\nfunction kpiTiles(tiles) {\n  const w = Math.floor(100 / tiles.length);\n  return `<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"6\" style=\"margin:0 -6px 4px;\"><tr>${tiles.map((t) => {\n    const tone = UI.tone[t.tone || 'info'];\n    return `<td width=\"${w}%\" style=\"background:${tone.bg};border:1px solid ${tone.line};border-radius:8px;padding:10px 12px;vertical-align:top;\"><div style=\"font-size:22px;font-weight:bold;color:${tone.fg};line-height:1.1;\">${esc(t.value)}</div><div style=\"font-size:11px;color:${tone.fg};margin-top:4px;\">${esc(t.label)}</div></td>`;\n  }).join('')}</tr></table>`;\n}\n// rows: [[cells...]], headers: [..]\nfunction dataTable(headers, rows, emptyText = 'None') {\n  if (!rows.length) return para(emptyText, `color:${UI.muted};`);\n  return `<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;margin:2px 0 6px;\"><tr>${headers.map((h) => `<td style=\"padding:6px 8px;font-size:11px;font-weight:bold;color:${UI.muted};background:${UI.panel};border-bottom:1px solid ${UI.line};\">${esc(h)}</td>`).join('')}</tr>${rows.map((r) => `<tr>${r.map((c) => `<td style=\"padding:6px 8px;font-size:13px;color:${UI.text};border-bottom:1px solid ${UI.line};\">${esc(c)}</td>`).join('')}</tr>`).join('')}</table>`;\n}\n// banner: {tone, badge:{value,label}?, title, subtitle}\nfunction banner(b) {\n  const t = UI.tone[b.tone || 'info'];\n  const badge = b.badge ? `<td width=\"76\" style=\"padding-right:14px;vertical-align:middle;\"><table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"center\" style=\"background:${t.solid};color:#ffffff;border-radius:8px;padding:8px 10px;min-width:56px;\"><div style=\"font-size:22px;font-weight:bold;line-height:1;\">${esc(b.badge.value)}</div><div style=\"font-size:10px;margin-top:3px;\">${esc(b.badge.label)}</div></td></tr></table></td>` : '';\n  return `<tr><td style=\"background:${t.bg};border-bottom:1px solid ${t.line};padding:14px 22px;\"><table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr>${badge}<td style=\"vertical-align:middle;\"><div style=\"font-size:16px;font-weight:bold;color:${t.fg};\">${esc(b.title)}</div>${b.subtitle ? `<div style=\"font-size:13px;color:${t.fg};margin-top:3px;\">${esc(b.subtitle)}</div>` : ''}</td></tr></table></td></tr>`;\n}\n// Full email. bodyHtml is already-built (escaped) component HTML.\nfunction layout({ product = 'Acme Cover', section, bannerSpec, bodyHtml, footer }) {\n  return `<!DOCTYPE html><html><body style=\"margin:0;padding:0;background:#eef1f5;font-family:Arial,Helvetica,sans-serif;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#eef1f5;padding:20px 0;\"><tr><td align=\"center\">\n<table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:600px;background:#ffffff;border:1px solid #d9dee5;border-radius:10px;overflow:hidden;\">\n<tr><td style=\"background:${UI.brand};padding:14px 22px;\"><table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td style=\"color:#ffffff;font-size:16px;font-weight:bold;\">${esc(product)} &middot; ${esc(section)}</td><td align=\"right\" style=\"color:#cfe0ea;font-size:12px;\">Internal: claims staff only</td></tr></table></td></tr>\n${bannerSpec ? banner(bannerSpec) : ''}\n<tr><td style=\"padding:8px 22px 20px;\">${bodyHtml}</td></tr>\n<tr><td style=\"background:#f8fafc;border-top:1px solid ${UI.line};padding:10px 22px;font-size:11px;color:${UI.faint};\">${esc(footer || 'Generated by ClaimFlow. Contains no claimant contact details by design.')}</td></tr>\n</table></td></tr></table></body></html>`;\n}\n\n// ── Build the daily report email (uses internal-email.js) ────────\nconst s = $input.first().json.report;\nconst day = DateTime.fromJSDate(new Date(s.generated_at)).setZone('Africa/Johannesburg');\nconst breaches = s.sla_breaches || [];\nconst pretty = (x) => String(x || '').replace(/_/g, ' ');\nconst sortDesc = (obj) => Object.entries(obj || {}).sort((a, b) => b[1] - a[1]);\nconst pending = (s.review && s.review.pending) || 0;\nconst decisions = (s.review && s.review.decisions) || {};\n\nconst tiles = kpiTiles([\n  { label: 'Claims received (24 h)', value: String(s.received), tone: 'info' },\n  { label: `Accepted (${s.rejected_ineligible} ineligible)`, value: String(s.accepted), tone: 'info' },\n  { label: 'Average risk', value: s.avg_final_risk === null ? 'n/a' : String(s.avg_final_risk), tone: s.avg_final_risk === null ? 'info' : toneForScore(s.avg_final_risk) },\n  { label: `SLA breaches (> ${s.sla_hours} h)`, value: String(breaches.length), tone: breaches.length ? 'high' : 'low' },\n]);\nconst routeRows = sortDesc(s.by_route);\nconst routeMax = Math.max(1, ...routeRows.map(([, n]) => n));\nconst routeTable = routeRows.length\n  ? factsTable(routeRows.map(([r, n]) => [pretty(r), `${n}${bar((n / routeMax) * 100, r === 'fraud_review' ? 'high' : r === 'manual_review' ? 'medium' : 'info')}`, { html: true }]))\n  : para('No claims in the last 24 hours.', 'color:#52606d;');\nconst inj = s.injection || {};\nconst ai = s.ai || {};\nconst errs = s.errors || {};\n\nconst body = [\n  tiles,\n  heading('Routes (last 24 h)'),\n  routeTable,\n  heading(`SLA breaches: open longer than ${s.sla_hours} h`),\n  dataTable(['Claim', 'Status', 'Age'], breaches.map((b) => [b.claim_ref, pretty(b.status), `${b.age_hours} h`]), 'None. Every open claim is within SLA.'),\n  heading('Open work (all time)'),\n  chips(sortDesc(s.open_by_status).map(([st, n]) => ({ text: `${pretty(st)}: ${n}`, tone: st === 'pending_fraud_review' ? 'high' : 'info' }))),\n  heading('Fraud review (last 24 h)'),\n  factsTable([\n    ['Decisions', `approved ${decisions.approve || 0} · rejected ${decisions.reject || 0} · more info ${decisions.more_info || 0}`],\n    ['Escalated / timed out', `${(s.review && s.review.escalated) || 0} / ${(s.review && s.review.timed_out) || 0}`, ((s.review && s.review.timed_out) || 0) > 0 ? { emphasis: 'medium' } : {}],\n    ['Still awaiting a decision', String(pending), pending > 0 ? { emphasis: 'medium' } : {}],\n  ]),\n  heading('Top fraud indicators (AI) and rule flags'),\n  chips([...(s.top_indicators || []).map((i) => ({ text: `${pretty(i.name)} ${i.n}`, tone: 'medium' })),\n         ...(s.top_flags || []).map((f) => ({ text: `${pretty(f.name)} ${f.n}`, tone: /injection/.test(f.name) ? 'high' : 'info' }))]),\n  heading('Injection defence, AI and system health'),\n  factsTable([\n    ['Injection hard flags', String(inj.hard_flagged || 0), (inj.hard_flagged || 0) > 0 ? { emphasis: 'high' } : {}],\n    ['Injection check unavailable', String(inj.detector_unavailable || 0), (inj.detector_unavailable || 0) > 0 ? { emphasis: 'medium' } : {}],\n    ['AI analyses ok / failed', `${ai.ok || 0} / ${ai.failed || 0}`, (ai.failed || 0) > 0 ? { emphasis: 'medium' } : {}],\n    ['Models used', sortDesc(ai.models).map(([m, n]) => `${m} (${n})`).join(', ') || 'none'],\n    ['Claimant emails sent', String(s.notifications_sent)],\n    ['Workflow errors', String(errs.count || 0), (errs.count || 0) > 0 ? { emphasis: 'high' } : {}],\n    ['Total claimed (24 h)', money(s.total_claimed)],\n  ]),\n  (errs.recent || []).length ? dataTable(['Workflow', 'Node', 'When'], errs.recent.map((e) => [e.workflow, e.node || '-', DateTime.fromJSDate(new Date(e.at)).setZone('Africa/Johannesburg').toFormat('d LLL HH:mm')])) : '',\n].join('\\n');\n\nconst bannerSpec = breaches.length\n  ? { tone: 'high', title: `${breaches.length} claim${breaches.length === 1 ? '' : 's'} past SLA`, subtitle: `Daily report for ${day.toFormat('cccc d LLLL yyyy')} · last 24 hours` }\n  : { tone: 'low', title: 'All open claims within SLA', subtitle: `Daily report for ${day.toFormat('cccc d LLLL yyyy')} · last 24 hours` };\nconst html = layout({ section: 'Daily ops report', bannerSpec, bodyHtml: body, footer: 'Aggregates and claim references only. No claimant personal information.' });\nconst text = [\n  `ClaimFlow daily report - ${day.toFormat('d LLL yyyy')}`,\n  `Received ${s.received}, accepted ${s.accepted}, ineligible ${s.rejected_ineligible}, avg risk ${s.avg_final_risk ?? 'n/a'}`,\n  `SLA breaches (> ${s.sla_hours} h): ${breaches.length}`, ...breaches.map((b) => `- ${b.claim_ref} ${b.status} ${b.age_hours} h`),\n  `Routes: ${routeRows.map(([r, n]) => `${r} ${n}`).join(', ') || 'none'}`,\n  `Fraud review: approved ${decisions.approve || 0}, rejected ${decisions.reject || 0}, more info ${decisions.more_info || 0}; pending ${pending}`,\n  `Injection hard flags ${inj.hard_flagged || 0}; AI failed ${ai.failed || 0}; workflow errors ${errs.count || 0}`,\n].join('\\n');\nconst subject = `ClaimFlow daily report ${day.toFormat('d LLL')}: ${s.received} claims, ${breaches.length} SLA breach${breaches.length === 1 ? '' : 'es'}`;\nreturn [{ json: { subject, html, text } }];"
+      }
+    },
+    {
+      "id": "0704125c-1369-4b96-b4ed-f8aeb931e95b",
+      "name": "Send_Report_Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        768,
+        0
+      ],
+      "parameters": {
+        "resource": "email",
+        "operation": "send",
+        "fromEmail": "={{ \"ClaimFlow <\" + $env.CLAIMFLOW_FROM_EMAIL + \">\" }}",
+        "toEmail": "={{ $env.CLAIMFLOW_OPS_EMAIL }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "both",
+        "text": "={{ $json.text }}",
+        "html": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "cfSmtpMailpit001",
+          "name": "ClaimFlow SMTP"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "fd23b88b-1783-4c0e-b2e9-95a2040771a0",
+      "name": "Note 6fde86",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -400
+      ],
+      "parameters": {
+        "content": "## Daily Ops Report\nEvery day at **07:00 SAST** (workflow timezone). Missed runs execute when n8n comes back.\n\n- One SQL query → one consistent snapshot as JSON\n- SLA breach = open claim older than `CLAIMFLOW_SLA_HOURS` (48)\n- Aggregates and claim refs only, **no PI**\n- Run now: `./scripts/run-report.sh`",
+        "width": 660,
+        "height": 270
+      }
+    }
+  ],
+  "connections": {
+    "Every_Day_0700": {
+      "main": [
+        [
+          {
+            "node": "Daily_Stats_PG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run_Now": {
+      "main": [
+        [
+          {
+            "node": "Daily_Stats_PG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily_Stats_PG": {
+      "main": [
+        [
+          {
+            "node": "Build_Report_Func",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build_Report_Func": {
+      "main": [
+        [
+          {
+            "node": "Send_Report_Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

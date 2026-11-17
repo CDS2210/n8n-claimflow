@@ -44,6 +44,7 @@ set_secret CLAIMFLOW_DB_PASSWORD       "$(openssl rand -hex 16)"
 set_secret N8N_ENCRYPTION_KEY          "$(openssl rand -hex 32)"
 set_secret CLAIMFLOW_PII_KEY           "$(openssl rand -base64 32)"
 set_secret CLAIMFLOW_PII_HMAC_KEY      "$(openssl rand -base64 32)"
+set_secret CLAIMFLOW_STATUS_LINK_KEY   "$(openssl rand -base64 32)"
 ok ".env ready (secrets are not printed)"
 HTTPS_PORT="$(grep -E '^HTTPS_PORT=' .env | cut -d= -f2 | sed 's/[[:space:]]*#.*$//')"; HTTPS_PORT="${HTTPS_PORT:-$HTTPS_PORT_DEFAULT}"
 

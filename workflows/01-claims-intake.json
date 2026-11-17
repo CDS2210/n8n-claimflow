@@ -150,12 +150,12 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.5,
       "position": [
-        1120,
+        1344,
         192
       ],
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ { \"claim_ref\": $json.existing_claim_ref, \"duplicate\": true, \"status_url\": $env.WEBHOOK_URL + \"webhook/claims/status?ref=\" + $json.existing_claim_ref } }}",
+        "responseBody": "={{ { \"claim_ref\": $json.existing_claim_ref, \"duplicate\": true, \"status_url\": $json.status_url } }}",
         "options": {
           "responseCode": 200
         }
@@ -266,12 +266,12 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.5,
       "position": [
-        2240,
+        2464,
         192
       ],
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ { \"claim_ref\": $json.claim_ref, \"status\": \"rejected_ineligible\", \"reasons\": $('Encrypt_PII_Func').item.json.reasons } }}",
+        "responseBody": "={{ { \"claim_ref\": $json.claim_ref, \"status\": \"rejected_ineligible\", \"reasons\": $('Check_Eligibility_Func').item.json.reasons, \"status_url\": $json.status_url } }}",
         "options": {
           "responseCode": 422
         }
@@ -855,12 +855,12 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.5,
       "position": [
-        4256,
+        4480,
         0
       ],
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ { \"claim_ref\": $json.claim_ref, \"status\": \"received\", \"status_url\": $env.WEBHOOK_URL + \"webhook/claims/status?ref=\" + $json.claim_ref } }}",
+        "responseBody": "={{ { \"claim_ref\": $json.claim_ref, \"status\": \"received\", \"status_url\": $json.status_url } }}",
         "options": {
           "responseCode": 202
         }
@@ -889,7 +889,7 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.5,
       "position": [
-        4512,
+        4736,
         0
       ],
       "parameters": {
@@ -1003,7 +1003,7 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.4,
       "position": [
-        4768,
+        4992,
         -192
       ],
       "parameters": {
@@ -1068,7 +1068,7 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.4,
       "position": [
-        4768,
+        4992,
         0
       ],
       "parameters": {
@@ -1133,7 +1133,7 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.4,
       "position": [
-        4768,
+        4992,
         192
       ],
       "parameters": {
@@ -1176,7 +1176,7 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.4,
       "position": [
-        2496,
+        2720,
         192
       ],
       "parameters": {
@@ -1233,6 +1233,92 @@
         "options": {
           "waitForSubWorkflow": false
         }
+      }
+    },
+    {
+      "id": "0a990498-9307-43e2-95d5-82067cbfa672",
+      "name": "Status_Url_202_Func",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4256,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// ── ClaimFlow signed status links ─────────────────────────────────\n// Claim references are sequential, so the Status API needs proof the caller was given the\n// link: t = first 32 hex chars of HMAC-SHA256(CLAIMFLOW_STATUS_LINK_KEY, claim_ref).\n// Copied into the Code nodes that build or check links (same pattern as pii-crypto.js).\nconst linkCrypto = require('crypto');\n\nfunction statusToken(claimRef, env) {\n  const key = Buffer.from(String(env.CLAIMFLOW_STATUS_LINK_KEY || ''), 'base64');\n  if (key.length < 32) throw new Error('CLAIMFLOW_STATUS_LINK_KEY must be at least 32 random bytes, base64-encoded');\n  return linkCrypto.createHmac('sha256', key).update(`status:${claimRef}`, 'utf8').digest('hex').slice(0, 32);\n}\n\nfunction statusUrl(claimRef, env) {\n  return `${env.WEBHOOK_URL}webhook/claims/status?ref=${encodeURIComponent(claimRef)}&t=${statusToken(claimRef, env)}`;\n}\n\n// Constant-time comparison so response timing doesn't reveal how much of a token matched.\nfunction statusTokenValid(claimRef, token, env) {\n  const expected = Buffer.from(statusToken(claimRef, env), 'utf8');\n  const given = Buffer.from(String(token || ''), 'utf8');\n  return given.length === expected.length && linkCrypto.timingSafeEqual(given, expected);\n}\n\n// ── Add the signed status link ───────────────────────────────────\nconst it = $input.first().json;\nconst ref = it.claim_ref || it.existing_claim_ref;\nreturn [{ json: { ...it, status_url: ref ? statusUrl(ref, $env) : null } }];"
+      }
+    },
+    {
+      "id": "003cbfd1-4ec7-4c21-a503-72fd5dba5066",
+      "name": "Status_Url_Dup_Func",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        192
+      ],
+      "parameters": {
+        "jsCode": "// ── ClaimFlow signed status links ─────────────────────────────────\n// Claim references are sequential, so the Status API needs proof the caller was given the\n// link: t = first 32 hex chars of HMAC-SHA256(CLAIMFLOW_STATUS_LINK_KEY, claim_ref).\n// Copied into the Code nodes that build or check links (same pattern as pii-crypto.js).\nconst linkCrypto = require('crypto');\n\nfunction statusToken(claimRef, env) {\n  const key = Buffer.from(String(env.CLAIMFLOW_STATUS_LINK_KEY || ''), 'base64');\n  if (key.length < 32) throw new Error('CLAIMFLOW_STATUS_LINK_KEY must be at least 32 random bytes, base64-encoded');\n  return linkCrypto.createHmac('sha256', key).update(`status:${claimRef}`, 'utf8').digest('hex').slice(0, 32);\n}\n\nfunction statusUrl(claimRef, env) {\n  return `${env.WEBHOOK_URL}webhook/claims/status?ref=${encodeURIComponent(claimRef)}&t=${statusToken(claimRef, env)}`;\n}\n\n// Constant-time comparison so response timing doesn't reveal how much of a token matched.\nfunction statusTokenValid(claimRef, token, env) {\n  const expected = Buffer.from(statusToken(claimRef, env), 'utf8');\n  const given = Buffer.from(String(token || ''), 'utf8');\n  return given.length === expected.length && linkCrypto.timingSafeEqual(given, expected);\n}\n\n// ── Add the signed status link ───────────────────────────────────\nconst it = $input.first().json;\nconst ref = it.claim_ref || it.existing_claim_ref;\nreturn [{ json: { ...it, status_url: ref ? statusUrl(ref, $env) : null } }];"
+      }
+    },
+    {
+      "id": "776c3632-0a1e-460c-923a-31d41d348c13",
+      "name": "Status_Url_422_Func",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        192
+      ],
+      "parameters": {
+        "jsCode": "// ── ClaimFlow signed status links ─────────────────────────────────\n// Claim references are sequential, so the Status API needs proof the caller was given the\n// link: t = first 32 hex chars of HMAC-SHA256(CLAIMFLOW_STATUS_LINK_KEY, claim_ref).\n// Copied into the Code nodes that build or check links (same pattern as pii-crypto.js).\nconst linkCrypto = require('crypto');\n\nfunction statusToken(claimRef, env) {\n  const key = Buffer.from(String(env.CLAIMFLOW_STATUS_LINK_KEY || ''), 'base64');\n  if (key.length < 32) throw new Error('CLAIMFLOW_STATUS_LINK_KEY must be at least 32 random bytes, base64-encoded');\n  return linkCrypto.createHmac('sha256', key).update(`status:${claimRef}`, 'utf8').digest('hex').slice(0, 32);\n}\n\nfunction statusUrl(claimRef, env) {\n  return `${env.WEBHOOK_URL}webhook/claims/status?ref=${encodeURIComponent(claimRef)}&t=${statusToken(claimRef, env)}`;\n}\n\n// Constant-time comparison so response timing doesn't reveal how much of a token matched.\nfunction statusTokenValid(claimRef, token, env) {\n  const expected = Buffer.from(statusToken(claimRef, env), 'utf8');\n  const given = Buffer.from(String(token || ''), 'utf8');\n  return given.length === expected.length && linkCrypto.timingSafeEqual(given, expected);\n}\n\n// ── Add the signed status link ───────────────────────────────────\nconst it = $input.first().json;\nconst ref = it.claim_ref || it.existing_claim_ref;\nreturn [{ json: { ...it, status_url: ref ? statusUrl(ref, $env) : null } }];"
+      }
+    },
+    {
+      "id": "44bd3564-a6ee-415e-8d7f-e6e5beaadc5a",
+      "name": "Note 231032",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        -420
+      ],
+      "parameters": {
+        "content": "## Claims Intake\n`POST /webhook/claims`\n\nValidate → idempotency → policy eligibility → **encrypt PII** → injection detector + AI analysis (`LLM_MODE`) → deterministic rules → insert claim + audit → **202** → route.\n\nThe LLM never decides the route. Responses never include scores. See `docs/workflows/01-claims-intake.md`.",
+        "width": 760,
+        "height": 250
+      }
+    },
+    {
+      "id": "2b524619-43e5-4339-983f-0a54892824d7",
+      "name": "Note be8ed7",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        -420
+      ],
+      "parameters": {
+        "content": "### Security\nPII is encrypted (AES-256-GCM) in `Encrypt_PII_Func`; nothing after it sees plaintext. Successful runs save no execution data.",
+        "width": 520,
+        "height": 160,
+        "color": 5
+      }
+    },
+    {
+      "id": "cbc5e0ff-109c-4d3f-9773-367b4a8c2bfb",
+      "name": "Note 3e76b3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2400,
+        -720
+      ],
+      "parameters": {
+        "content": "### AI + injection defence\nIndependent detector per provider + regex tripwire = hard flags. Mock mode is deterministic for tests.",
+        "width": 520,
+        "height": 150,
+        "color": 5
       }
     }
   ],
@@ -1292,7 +1378,7 @@
       "main": [
         [
           {
-            "node": "200_WebhookR",
+            "node": "Status_Url_Dup_Func",
             "type": "main",
             "index": 0
           }
@@ -1350,7 +1436,7 @@
       "main": [
         [
           {
-            "node": "422_WebhookR",
+            "node": "Status_Url_422_Func",
             "type": "main",
             "index": 0
           }
@@ -1695,7 +1781,7 @@
       "main": [
         [
           {
-            "node": "202_WebhookR",
+            "node": "Status_Url_202_Func",
             "type": "main",
             "index": 0
           }
@@ -1767,6 +1853,39 @@
           }
         ]
       ]
+    },
+    "Status_Url_202_Func": {
+      "main": [
+        [
+          {
+            "node": "202_WebhookR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status_Url_Dup_Func": {
+      "main": [
+        [
+          {
+            "node": "200_WebhookR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status_Url_422_Func": {
+      "main": [
+        [
+          {
+            "node": "422_WebhookR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -1775,7 +1894,9 @@
     "saveDataSuccessExecution": "none",
     "saveDataErrorExecution": "all",
     "saveManualExecutions": true,
-    "saveExecutionProgress": false
+    "saveExecutionProgress": false,
+    "timezone": "Africa/Johannesburg",
+    "errorWorkflow": "cfErrorHandler01"
   },
   "pinData": {},
   "meta": {},
