@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -258,7 +259,48 @@ const traceUrl = (ref, t = traceToken(ref)) => `${BASE}/webhook/demo/trace?ref=$
   const n = Number(docker(['exec', '-T', 'postgres', 'psql', '-U', ENV.N8N_DB_USER, '-d', 'n8n', '-tA', '-c',
     `SELECT count(*) FROM execution_entity WHERE "workflowId" = 'pY62sSjeshgn8nDx' AND status = 'success' AND "deletedAt" IS NULL AND "startedAt" >= ${lit(startedIso)}`]).trim());
   check(row, DEMO ? 'successful intake runs kept' : 'successful intake runs not kept', DEMO ? n > 0 : n === 0, `${n} kept`); }
-{ const row = flow('F12', 'no unexpected workflow errors');
+// Sandbox policies (demo form page 2). The suite can't log in to the form, so it runs the
+// workflow's own Create_Sandbox_PG statement (read from the JSON, so it can't drift), then posts
+// claims through the real intake API. The form pages themselves are covered in docs/testing.md.
+{ const row = flow('F12', 'sandbox policies (SQL + rules)');
+  const wf = JSON.parse(fs.readFileSync(path.join(ROOT, 'workflows/07-demo-portal.json'), 'utf8'));
+  const createSql = wf.nodes.find((n) => n.name === 'Create_Sandbox_PG').parameters.query;
+  const require = createRequire(import.meta.url);
+  const { piiKeys, encryptField, blindIndex } = require('./lib/pii-crypto.js');
+  const keys = piiKeys(ENV);
+  const holder = { name: 'Sandbox Tester', email: `sandbox.${RUN_ID}@example.com` };
+  const makePolicy = (p) => {
+    const args = [encryptField(holder.name, 'name', keys), encryptField(holder.email, 'email', keys), blindIndex(holder.email, keys), null,
+      p.product, p.sum, 0, sastDate(p.startAgo), sastDate(p.endAgo), p.status, JSON.stringify(p.prior.map(sastDate))];
+    const q = `PREPARE sbx AS ${createSql.replace(/;\s*$/, '')}; EXECUTE sbx(${args.map((a) => (a === null ? 'NULL' : lit(a))).join(', ')});`;
+    return (sql(q).match(/POL-SBX-\d{6}/) || [''])[0];   // psql also prints the PREPARE tag
+  };
+  const claimOn = async (policy, tag) => post({ idempotency_key: `sandbox-test-${tag}-${RUN_ID}`, policy_number: policy, channel: 'web',
+    claimant: holder, incident_date: sastDate(2), claimed_amount: 3000, currency: 'ZAR', description: 'A stone hit my windscreen on the N1 and cracked it.' });
+  const codes = (ref) => (sqlJson(`SELECT rule_flags FROM claims WHERE claim_ref = ${lit(ref)}`)[0]?.rule_flags || []).map((f) => f.code);
+
+  const fresh = makePolicy({ product: 'motor', sum: 180000, startAgo: 10, endAgo: -355, status: 'active', prior: [8, 5] });
+  const old = makePolicy({ product: 'home', sum: 500000, startAgo: 700, endAgo: -300, status: 'active', prior: [450, 60] });
+  const lapsed = makePolicy({ product: 'travel', sum: 50000, startAgo: 400, endAgo: 35, status: 'lapsed', prior: [] });
+  check(row, 'policies numbered POL-SBX-…', [fresh, old, lapsed].every((p) => /^POL-SBX-\d{6}$/.test(p)), `${fresh}, ${old}, ${lapsed}`);
+  check(row, 'earlier claims stored as closed history', Number(sql(`SELECT count(*) FROM claims WHERE policy_number = ${lit(fresh)} AND status = 'closed'`)) === 2);
+  check(row, 'holder PI encrypted', sql(`SELECT holder_name_enc LIKE 'v1:%' FROM policies WHERE policy_number = ${lit(fresh)}`) === 't');
+  const a = await claimOn(fresh, 'fresh');
+  const aFlags = codes(a.json?.claim_ref);
+  check(row, 'new policy + 2 recent claims: new_policy, frequent_claimant', a.code === 202 && aFlags.includes('new_policy') && aFlags.includes('frequent_claimant'), aFlags.join(','));
+  const b = await claimOn(old, 'old');
+  const bFlags = codes(b.json?.claim_ref);
+  check(row, 'claim older than 12 months not counted', b.code === 202 && !bFlags.includes('frequent_claimant') && !bFlags.includes('new_policy'), bFlags.join(','));
+  const c = await claimOn(lapsed, 'lapsed');
+  check(row, 'lapsed sandbox policy: 422 policy_not_active', c.code === 422 && (c.json?.reasons || []).includes('policy_not_active'), `${c.code} ${JSON.stringify(c.json?.reasons)}`);
+  row.http = `${a.code}/${b.code}/${c.code}`;
+  if (DEMO) {
+    const page = await (await fetch(traceUrl(a.json?.claim_ref))).text();
+    check(row, 'trace page shows the sandbox policy and its history', page.includes('Sandbox policy and claim history') && page.includes(fresh) && (page.match(/<b>counted<\/b>/g) || []).length === 2);
+    const pageOld = await (await fetch(traceUrl(b.json?.claim_ref))).text();
+    check(row, 'trace page marks the old claim "not counted"', pageOld.includes('too old, not counted'));
+  } }
+{ const row = flow('F13', 'no unexpected workflow errors');
   const n = Number(sql(`SELECT count(*) FROM workflow_errors WHERE created_at >= ${lit(startedIso)}`));
   check(row, '0 errors logged during the run', n === 0, `${n} logged`); }
 

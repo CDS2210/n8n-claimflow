@@ -99,6 +99,24 @@ This sends them through the **full pipeline** and reports, per sample, which lay
 route, plus totals (attacks caught, false alarms). It's a **measurement**, not a pass/fail gate:
 the numbers go into the README for whichever model was used.
 
+## Sandbox policies (2026-11-18)
+
+**146/146 with demo mode off, 151/151 with it on.** F12 covers the builder's SQL and the rules
+(see [07-demo-portal.md](workflows/07-demo-portal.md#tests)). The three form pages were driven over
+HTTP against a temporary no-login copy, with llama3.2:3b:
+
+| Policy built | Result |
+|---|---|
+| Motor, R180 000, started 10 days ago, 2 earlier claims this month | `new_policy`, `frequent_claimant`, `round_amount`, `model_rule_disagreement` → fraud review |
+| Home, started 700 days ago, earlier claims 450 and 60 days ago | 1 counted, no flags → fast track |
+| Travel, lapsed | 422 `policy_not_active`, `incident_outside_cover` |
+| Cover R500, excess R900, end before start, bad / future / pre-start claim dates | all six problems listed on the error screen, nothing stored |
+| Example policy POL-MTR-100001 | fast track (page 2 shows the dropdown instead) |
+
+Found while testing: radio buttons post their value as a JSON array, so the page-1 branch
+accepts a string or an array; and deploy now waits until the webhooks answer before it exits
+(right after a publish, n8n can still return 404 for a moment).
+
 ## Fresh install (2026-11-18)
 
 The repo was copied without `.env`, `certs/` or `ca-private/` and started under a separate

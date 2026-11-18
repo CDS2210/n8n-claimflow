@@ -78,6 +78,17 @@ const n8n = (...args) => {
     pending = blocked;
   }
 
+  // n8n activates published workflows a moment after the CLI returns. Wait until the webhooks
+  // answer, so "deploy finished" really means "ready" (a malformed status request is 400 when
+  // the Status API is live, 404 while it isn't yet; nothing is stored).
+  let live = false;
+  for (let i = 0; i < 45 && !live; i++) {
+    try { live = (await fetch('http://n8n:5678/webhook/claims/status?ref=deploy-check')).status === 400; } catch { /* starting */ }
+    if (!live) await new Promise((r) => setTimeout(r, 2000));
+  }
+  if (!live) die('workflows were published but the webhooks did not come up within 90 s (docker compose logs n8n)');
+  ok('webhooks are live');
+
   // ── 4. Local LLM ──
   if (env.LLM_MODE === 'ollama') {
     log('Local LLM (Ollama)');

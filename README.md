@@ -8,7 +8,7 @@ a standard queue, human fraud review or rejection. Claimants get emails and a st
 fraud team gets a decision form; ops gets a daily report and alerts.
 
 `n8n 2.47.7` · `PostgreSQL 16` · `Caddy (TLS)` · `Mailpit` · LLM: `mock` / OpenAI / Anthropic / Ollama
-· only Docker needed to run it · 140+ automated end-to-end checks · browser demo mode
+· only Docker needed to run it · 145+ automated end-to-end checks · browser demo with a policy sandbox
 
 > **Acme Cover is fictional.** Every person, policy, email address and phone number in this repo is
 > invented. This is a portfolio project, not affiliated with any real insurer.
@@ -42,7 +42,8 @@ process **without giving it the decision**:
   including where it falls short.
 - **No tipping off.** Claimants never see scores, flags or the word "fraud", in emails or the
   Status API.
-- **See it run.** Demo mode adds a claim form and a live **Claim Trace** page: every pipeline step,
+- **See it run.** Demo mode adds a claim form, with a **sandbox policy builder** (type, cover,
+  dates, status, earlier claims), and a live **Claim Trace** page: every pipeline step,
   the AI output, each rule flag, the route and the audit trail, updating while a human reviews.
 - **Tested end to end.** `./scripts/run-scenarios.sh` resets the data and runs 140 checks over real
   HTTPS (143 with demo mode on), including submitting the fraud-review form and reading emails from Mailpit.
@@ -158,10 +159,14 @@ To log claims through a form and watch them move through the pipeline:
 1. In `.env` set `CLAIMFLOW_DEMO_MODE=true` and, for a real model, `LLM_MODE=ollama` (or `openai` /
    `anthropic` with a key, plus `COMPOSE_PROFILES=ollama` for Ollama). Then `docker compose up -d`.
 2. Log in to n8n at https://localhost:8443, then open **https://localhost:8443/form/claim-demo**.
-3. Pick a policy, enter made-up details and submit. The form calls the same `POST /webhook/claims`
-   as any client, then opens the **Claim Trace** page: pipeline steps, injection check, AI output
+3. Choose an **example policy**, or **build your own sandbox policy**: type, cover amount,
+   excess, start and end dates, status, and the dates of earlier claims, so you can test exactly
+   the rule you want (a new policy, a claim near the cover limit, a frequent claimant, a lapsed
+   policy). Then enter made-up claim details and submit. The form calls the same
+   `POST /webhook/claims` as any client, then opens the **Claim Trace** page: pipeline steps, injection check, AI output
    (model, score, summary, indicators), every rule flag with its points, the score blend, the route
-   and why, masked PII next to its ciphertext, and the append-only audit trail.
+   and why, the policy with its earlier claims (counted or too old for the 12-month rule), masked
+   PII next to its ciphertext, and the append-only audit trail.
 4. If it went to fraud review, open Mailpit, click **Review and decide**, and watch the trace page
    update (it refreshes every 3 s while anything is pending).
 5. **Node by node:** in demo mode the claim workflows keep their successful executions, so n8n's
@@ -279,7 +284,7 @@ Details, keys and rotation: [docs/security.md](docs/security.md).
 ## Testing and measured results
 
 ```bash
-./scripts/run-scenarios.sh            # 13 scenarios + 12 flow checks, mock mode
+./scripts/run-scenarios.sh            # 13 scenarios + 13 flow checks, mock mode
 ./scripts/run-scenarios.sh --redteam  # held-out injection set, any LLM_MODE
 ```
 
@@ -287,9 +292,9 @@ The suite resets the claim data to the seed state, then checks HTTP codes, route
 audit trail, every email (via Mailpit's API), the Status API, all three fraud-review decisions
 submitted through the real form, double-submit protection, no tipping off, that a database dump
 contains no sample PII, the daily report, demo mode (on: trace page, login-gated form, kept runs;
-off: everything 404, no runs kept), and that no workflow errors were logged.
+off: everything 404, no runs kept), sandbox policies (builder SQL, 12-month rule, lapsed), and that no workflow errors were logged.
 
-**Result: 140/140 checks with demo mode off, 143/143 with it on, about 27 seconds.** Its first runs caught two real bugs.
+**Result: 146/146 checks with demo mode off, 151/151 with it on, about 29 seconds.** Its first runs caught two real bugs.
 Details: [docs/testing.md](docs/testing.md).
 
 ### Prompt-injection red-team (honest numbers)
