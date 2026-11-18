@@ -99,6 +99,13 @@ This sends them through the **full pipeline** and reports, per sample, which lay
 route, plus totals (attacks caught, false alarms). It's a **measurement**, not a pass/fail gate:
 the numbers go into the README for whichever model was used.
 
+## Fresh install (2026-11-18)
+
+The repo was copied without `.env`, `certs/` or `ca-private/` and started under a separate
+Compose project (`COMPOSE_PROJECT_NAME=claimflowfresh`, so the main stack's volumes weren't
+touched) with only `docker compose run --rm init` and `docker compose up -d`: secrets, CA and
+certificates generated, all workflows deployed, and the suite passed **140/140** against it.
+
 ## Results (2026-11-18, with demo mode)
 
 **Scenario suite (mock mode): 140/140 checks with `CLAIMFLOW_DEMO_MODE=false`, 143/143 with

@@ -1,6 +1,6 @@
 // Encrypts the seed personal information (db/seed.sql -> seed_pii table) into the
 // encrypted columns, then drops seed_pii. Runs INSIDE the n8n container (it has the
-// keys in its environment and the pg driver), called by scripts/setup.sh:
+// keys in its environment and the pg driver), called by scripts/deploy.js (deploy service):
 //   docker compose exec -T n8n node /scripts/encrypt-seed-pii.js
 // Safe to re-run: does nothing once seed_pii is gone.
 const fs = require('fs');

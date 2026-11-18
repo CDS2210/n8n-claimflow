@@ -31,7 +31,8 @@ flowchart LR
     N -- "HTTPS" --> L[LLM APIs]
 ```
 
-- **One local certificate authority.** `scripts/setup.sh` creates `certs/ca.crt` and issues
+- **One local certificate authority.** the one-shot `init` container
+  (`scripts/init.sh`, pinned Alpine + openssl) creates `certs/ca.crt` and issues
   certificates for `localhost` (Caddy), `postgres` and `mailpit`. `certs/` is gitignored.
   Trust `certs/ca.crt` once and every local HTTPS page stops warning.
 - **TLS terminates at the proxy**, as it would at Azure Application Gateway or Front Door in
@@ -77,7 +78,7 @@ don't identify a person on their own.
 | `CLAIMFLOW_PII_HMAC_KEY` | 32-byte HMAC key (base64) for the blind index |
 | `N8N_ENCRYPTION_KEY` | n8n's own key for stored credentials (separate on purpose) |
 
-- `setup.sh` generates them into `.env` if they're missing. Losing `CLAIMFLOW_PII_KEY` means
+- The `init` container generates them into `.env` if they're missing. Losing `CLAIMFLOW_PII_KEY` means
   the stored PI can't be decrypted. Back it up like a password.
 - **Production:** keys come from Azure Key Vault (managed identity), never from a file.
 - **Rotation:** add a `v2` key, encrypt new data with it, re-encrypt old rows in a batch job,
@@ -88,7 +89,7 @@ don't identify a person on their own.
 
 ### Seed data
 `seed.sql` can't encrypt (it doesn't know the per-install key), so it writes seed PI to a
-temporary `seed_pii` table. `setup.sh` encrypts it into the real columns with the same code the
+temporary `seed_pii` table. The `deploy` container encrypts it into the real columns with the same code the
 workflow uses, then **drops** `seed_pii`.
 
 ## n8n execution history
@@ -121,7 +122,7 @@ default**:
 
 | What changes | Why it's acceptable locally | Guard |
 |---|---|---|
-| `setup.sh` imports Intake, Fraud Review and Notifications with `saveDataSuccessExecution: all`, so successful runs keep every node's input/output (including what was typed in the form) for 7 days | Only invented test data goes in; it's how you click through a run node by node | Off → setup imports the normal JSON again (verified by test F11) |
+| The `deploy` container imports Intake, Fraud Review and Notifications with `saveDataSuccessExecution: all`, so successful runs keep every node's input/output (including what was typed in the form) for 7 days | Only invented test data goes in; it's how you click through a run node by node | Off → setup imports the normal JSON again (verified by test F11) |
 | The **Claim Trace** page shows internal signals (scores, flags, route reasons, reviewer notes) | It's an internal view, like the fraud-review email | Signed link `HMAC("trace:"+ref)`, separate from status links; 404 unless demo mode is on; PI shown **masked** only |
 | A claim **form** at `/form/claim-demo` | Lets anyone at the keyboard try it | Requires an **n8n login** (Form Trigger "n8n User Auth"); unpublished when demo mode is off |
 

@@ -2,7 +2,7 @@
 
 A way to **use** ClaimFlow in a browser: log a test claim through a form, then watch what the
 pipeline did with it. It is published only when `CLAIMFLOW_DEMO_MODE=true` (re-run
-`./scripts/setup.sh` after changing it). Workflow id `cfDemoPortal0001`.
+`docker compose up -d` after changing it, which re-runs the deploy service). Workflow id `cfDemoPortal0001`.
 
 ```
  Claim_Form (n8n login)  →  Build_Claim_Func  →  Submit_Claim_HTTP  →  Read_Result_Func  →  Has_Claim_If
@@ -55,7 +55,7 @@ refresh is a `<meta>` tag), so it works with the sandbox left on.
 
 ## Part 3: watching it node by node
 
-In demo mode `setup.sh` imports Intake, Fraud Review and Notifications with
+In demo mode the deploy service imports Intake, Fraud Review and Notifications with
 `saveDataSuccessExecution: all` (the JSON files in `workflows/` keep `none`). Open
 **Executions** in n8n and click a run to see each node's input and output, including the prompt
 sent to the model and its raw answer. See [security.md](../security.md#demo-mode-claimflow_demo_modetrue-local-demos-only)

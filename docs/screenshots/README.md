@@ -1,6 +1,6 @@
 # Screenshots (to capture)
 
-The main README shows these files. Capture them after `./scripts/setup.sh` and a test run:
+The main README shows these files. Capture them after `docker compose up -d` and a test run:
 
 | File | What to capture |
 |---|---|

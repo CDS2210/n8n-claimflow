@@ -12,7 +12,7 @@ ca="$PWD/certs/ca.crt"; command -v cygpath >/dev/null 2>&1 && ca="$(cygpath -w "
 export NODE_EXTRA_CA_CERTS="$ca"     # trust our local CA for HTTPS
 
 mode="$(docker compose exec -T n8n printenv LLM_MODE 2>/dev/null || true)"
-[ -n "$mode" ] || { echo "n8n is not running. Start it with ./scripts/setup.sh"; exit 1; }
+[ -n "$mode" ] || { echo "n8n is not running. Start it with: docker compose up -d"; exit 1; }
 if [[ " $* " != *" --redteam "* ]] && [ "$mode" != "mock" ]; then
   echo "Scenario assertions need LLM_MODE=mock (running: $mode). Set it in .env and run: docker compose up -d n8n"
   exit 1

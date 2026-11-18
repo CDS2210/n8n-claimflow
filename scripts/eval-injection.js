@@ -2,7 +2,7 @@
 // Compares: (A) n8n Guardrails default jailbreak prompt, (B) ClaimFlow claims-specific prompt,
 // (C) the deterministic regex tripwire. Uses the same pass/fail rule as the n8n Guardrails node:
 // flagged === true AND confidenceScore >= threshold.
-//   docker compose --profile ollama up -d ollama   (model pulled by setup.sh in ollama mode)
+//   docker compose --profile ollama up -d ollama   (model pulled by the deploy service in ollama mode)
 //   node scripts/eval-injection.js [model]
 // Harness results 2026-11-15 (llama3.2:3b): A 0/5, B 4/5, C 3/5, B+C 5/5, 0/4 false alarms.
 // NOTE: this calls Ollama directly. Inside n8n the same prompt scored lower (Guardrails node 1/5,

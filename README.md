@@ -8,7 +8,7 @@ a standard queue, human fraud review or rejection. Claimants get emails and a st
 fraud team gets a decision form; ops gets a daily report and alerts.
 
 `n8n 2.47.7` · `PostgreSQL 16` · `Caddy (TLS)` · `Mailpit` · LLM: `mock` / OpenAI / Anthropic / Ollama
-· one command to run · 140+ automated end-to-end checks · browser demo mode
+· only Docker needed to run it · 140+ automated end-to-end checks · browser demo mode
 
 > **Acme Cover is fictional.** Every person, policy, email address and phone number in this repo is
 > invented. This is a portfolio project, not affiliated with any real insurer.
@@ -112,41 +112,41 @@ Full data model: [docs/database.md](docs/database.md).
 
 ## Quickstart (about 5 minutes)
 
-**You need:** Docker Desktop, Node.js 18+, and a bash shell with `openssl` (on Windows, **Git Bash**
-has both). For a local LLM on a GPU, an NVIDIA card with Docker GPU support (optional).
+**You need:** Docker Desktop (or Docker Engine with Compose v2). Nothing else: secrets,
+certificates and deployment all run in containers. For a local LLM on a GPU, an NVIDIA card with
+Docker GPU support (optional).
 
 ```bash
 git clone <this repo> claimflow && cd claimflow
-./scripts/setup.sh
+docker compose run --rm init      # first time only
+docker compose up -d
 ```
 
-`setup.sh` is the only setup step and is safe to re-run. It:
-1. creates `.env` from `.env.example` and generates every secret (never printed);
-2. creates a local certificate authority and TLS certificates (`certs/`, gitignored);
-3. starts the stack and waits until it's healthy;
-4. creates the n8n credentials inside the container (secrets never touch disk);
-5. encrypts the seed personal information;
-6. imports the seven workflows and publishes them in dependency order (the Demo Portal only in
-   demo mode);
-7. runs an HTTPS smoke test.
+- **`init`** (a one-shot Alpine container with openssl) creates `.env` from `.env.example` with
+  fresh random secrets (never printed) and a local certificate authority + TLS certificates
+  (`certs/`, gitignored; the CA key stays in `ca-private/`). Re-running it only fills in what's
+  missing.
+- **`up -d`** starts Caddy, Postgres, Mailpit and n8n, then the one-shot **`deploy`** service (the
+  n8n image): it creates the n8n credentials, encrypts the seed personal information, imports
+  the workflows and publishes them in dependency order (the Demo Portal only in demo mode), and
+  pulls the Ollama model if you use one. It runs again on every `up -d`, so settings changes and
+  workflow edits are applied the same way. Check it with `docker compose logs deploy`.
+- Prefer one command? `./scripts/setup.sh` (bash) does the same and adds an HTTPS smoke test.
 
 Then:
 
 1. **Create your n8n owner account** at **https://localhost:8443** (local only; any details).
 2. **Trust the local CA** so browsers stop warning. Windows (PowerShell, current user only):
    ```powershell
-   certutil -user -addstore Root .\certs\ca.crt
+   certutil -user -addstore Root .certsca.crt
    ```
    macOS: `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain certs/ca.crt`.
    Or click through the browser warning.
-3. **Send a claim:**
-   ```bash
-   ./scripts/post-sample.sh samples/03-suspicious-theft.json
-   ```
+3. **Try it:** turn on demo mode (next section) to log claims in the browser, or post a sample
+   claim with `./scripts/post-sample.sh samples/03-suspicious-theft.json` (needs Node.js 18+).
 4. **Open the inbox** at **https://localhost:8025**: the claimant's "received" email and the fraud
    team's review request are there. Click **Review and decide** to make a decision.
-5. **Check status** with the `status_url` from step 3's response.
-6. **Run the tests:**
+5. **Run the tests** (developer tool; needs bash and Node.js 18+, e.g. Git Bash on Windows):
    ```bash
    ./scripts/run-scenarios.sh
    ```
@@ -156,7 +156,7 @@ Then:
 To log claims through a form and watch them move through the pipeline:
 
 1. In `.env` set `CLAIMFLOW_DEMO_MODE=true` and, for a real model, `LLM_MODE=ollama` (or `openai` /
-   `anthropic` with a key). Then re-run `./scripts/setup.sh`.
+   `anthropic` with a key, plus `COMPOSE_PROFILES=ollama` for Ollama). Then `docker compose up -d`.
 2. Log in to n8n at https://localhost:8443, then open **https://localhost:8443/form/claim-demo**.
 3. Pick a policy, enter made-up details and submit. The form calls the same `POST /webhook/claims`
    as any client, then opens the **Claim Trace** page: pipeline steps, injection check, AI output
@@ -270,7 +270,7 @@ runs of PII workflows don't keep their data (unless demo mode is on).
 | Links | Status links HMAC-signed; review form links signed and single-use (n8n) |
 | Logs | Errors masked before storage or email; successful PII runs keep no execution data (purged within ~5 min) |
 | Demo mode | Off by default; the form needs an n8n login, the trace page a signed link; both 404 when off |
-| Secrets | Generated by `setup.sh` into a gitignored `.env`; credentials created inside the container |
+| Secrets | Generated by the `init` container into a gitignored `.env`; credentials created by the `deploy` container |
 
 Details, keys and rotation: [docs/security.md](docs/security.md).
 
@@ -317,15 +317,16 @@ All settings live in `.env` (documented in [.env.example](.env.example)). Most u
 |---|---|---|
 | `LLM_MODE` | `mock` | `mock` (deterministic, no key), `openai`, `anthropic`, `ollama` |
 | `OPENAI_MODEL` / `ANTHROPIC_MODEL` / `OLLAMA_MODEL` | `gpt-6-luna` / `claude-haiku-5-5` / `llama3.2:3b` | Model per provider |
-| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | empty | Re-run `setup.sh` after adding one |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | empty | `docker compose up -d` after adding one |
 | `CLAIMFLOW_REVIEW_TIMEOUT_MINUTES` | `1440` | Fraud review escalates after this |
 | `CLAIMFLOW_SLA_HOURS` | `48` | Daily report SLA threshold |
-| `CLAIMFLOW_DEMO_MODE` | `false` | Claim form + trace page, keeps executions; re-run `setup.sh` |
+| `CLAIMFLOW_DEMO_MODE` | `false` | Claim form + trace page, keeps executions |
+| `COMPOSE_PROFILES` | empty | `ollama` to start the local LLM |
 
-After changing `.env`: `docker compose up -d n8n`.
+After changing `.env`: `docker compose up -d` (re-creates n8n and re-runs deploy).
 
-**Local LLM on a GPU:** set `LLM_MODE=ollama` and re-run `./scripts/setup.sh`; it starts Ollama and
-pulls the model. llama3.2:3b on an RTX 4050 runs fully on the GPU at about 3 s per claim (detector +
+**Local LLM on a GPU:** set `LLM_MODE=ollama` and `COMPOSE_PROFILES=ollama`, then
+`docker compose up -d`; Ollama starts and the deploy service pulls the model. llama3.2:3b on an RTX 4050 runs fully on the GPU at about 3 s per claim (detector +
 analysis).
 
 **Cost (hosted):** about 1,100 input + 150 output tokens per analysis. At gpt-6-luna list prices
@@ -343,7 +344,9 @@ double with the injection detector's extra call. Tests run in mock mode and cost
 ├── db/                         init script (TLS-only), schema.sql, seed.sql
 ├── workflows/                  the seven n8n workflows (JSON, fixed IDs)
 ├── scripts/
-│   ├── setup.sh                one-command setup (idempotent)
+│   ├── init.sh                 first-run secrets + certificates (runs in the init container)
+│   ├── deploy.js               credentials, seed PII, workflows (runs in the deploy container)
+│   ├── setup.sh                optional one-command wrapper: init + up + smoke test
 │   ├── run-scenarios.sh/.mjs   end-to-end tests + red-team mode
 │   ├── reset-data.sh           back to seed data
 │   ├── post-sample.sh          post one sample claim

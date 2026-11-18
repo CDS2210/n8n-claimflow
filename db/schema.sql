@@ -36,7 +36,7 @@ CREATE DOMAIN pii_blind_index AS text
 -- ---------------------------------------------------------------------
 CREATE TABLE policies (
   policy_number  text PRIMARY KEY,
-  -- PI, encrypted by n8n. Nullable only because seed rows are encrypted by setup.sh
+  -- PI, encrypted by n8n. Nullable only because seed rows are encrypted by the deploy service
   -- right after the schema loads (see db/seed.sql).
   holder_name_enc    pii_ciphertext,
   holder_email_enc   pii_ciphertext,
@@ -72,7 +72,7 @@ CREATE TABLE claims (
   -- policy exists, so invalid claims can still be stored and audited.
   submitted_policy_number text          NOT NULL,
   policy_number           text          REFERENCES policies (policy_number),  -- NULL if not found
-  -- PI, encrypted by n8n (Encrypt_PII_Func). Seed rows are encrypted by setup.sh.
+  -- PI, encrypted by n8n (Encrypt_PII_Func). Seed rows are encrypted by the deploy service.
   claimant_name_enc       pii_ciphertext,
   claimant_email_enc      pii_ciphertext,
   claimant_email_hmac     pii_blind_index,

@@ -136,7 +136,7 @@ the claimant email.
 ## Build notes (n8n 2.47.7, verified)
 
 - **Publish order matters.** n8n refuses to publish a workflow that calls an unpublished
-  sub-workflow. `setup.sh` imports everything first, then publishes in passes until all are live
+  sub-workflow. Deployment (`scripts/deploy.js`) imports everything first, then publishes in passes until all are live
   (Notifications, then Fraud Review, then Intake).
 - **Form fields** are submitted as `field-0` … `field-3` in the order defined; the answers arrive
   on the resumed item keyed by field label. `Read_Response_Func` accepts either shape and
@@ -147,7 +147,7 @@ the claimant email.
   only *waiting* runs are stored, and they hold no claimant contact details.
 
 ## Shared: SMTP credential
-`ClaimFlow SMTP`, created by `setup.sh` like the others: host `mailpit`, port 1025,
+`ClaimFlow SMTP`, created by the deploy service like the others: host `mailpit`, port 1025,
 `secure: false` with STARTTLS (Mailpit requires it), certificate trusted through
 `NODE_EXTRA_CA_CERTS`. Production: a real provider (for example Azure Communication Services or
 Microsoft 365) with SPF/DKIM.

@@ -22,7 +22,7 @@ data. Don't add any.
 - Built six n8n workflows (claims intake API, fraud-review sub-workflow with form-based approval and
   timeout escalation, claimant notifications, signed status API, scheduled ops report, global error
   handler) with idempotent intake, respond-before-routing, retries and dependency-ordered deployment
-  from a one-command setup script.
+  from one-shot init/deploy containers, so Docker is the only prerequisite.
 
 **Security and compliance**
 - Implemented POPIA-minded data protection for a claims pipeline: field-level AES-256-GCM encryption

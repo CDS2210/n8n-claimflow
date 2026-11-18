@@ -1,5 +1,5 @@
 // Builds the n8n credentials file from environment variables. Runs INSIDE the n8n
-// container (called by scripts/setup.sh), so secrets never touch the host disk:
+// container (called by scripts/deploy.js in the deploy container), so secrets never touch the host disk:
 //   node /scripts/lib/make-credentials.js /tmp/creds.json && n8n import:credentials ...
 // Credential IDs are fixed so the workflow JSON can reference them.
 const fs = require('fs');
