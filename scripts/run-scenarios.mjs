@@ -2,6 +2,7 @@
 // checks LLM_MODE and resets the data first). No dependencies beyond Node 18+.
 //   node scripts/run-scenarios.mjs            mock-mode scenarios + flow checks (pass/fail)
 //   node scripts/run-scenarios.mjs --redteam  held-out injection set, any LLM_MODE (measurement)
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -195,8 +196,13 @@ for (const rv of reviews) {
   const r = reviews[0].link ? await fetch(reviews[0].link, { method: 'POST', body: fd }) : { status: 0 };
   await sleep(3000);
   row.http = r.status;
-  check(row, 'reused link rejected', r.status === 404, `HTTP ${r.status}`);
-  check(row, 'claim unchanged', claimByRef(r03.claim?.claim_ref)?.status === before); }
+  // Normally the finished run is deleted, so n8n answers 404. In demo mode the run is kept and
+  // n8n shows its "Form Submitted" page instead (200), still without resuming anything.
+  const demoKept = docker(['exec', '-T', 'n8n', 'printenv', 'CLAIMFLOW_DEMO_MODE']).trim().toLowerCase() === 'true';
+  check(row, demoKept ? 'reused link not resumed (404 or "already submitted")' : 'reused link rejected (404)',
+    r.status === 404 || (demoKept && r.status === 200), `HTTP ${r.status}`);
+  check(row, 'claim unchanged', claimByRef(r03.claim?.claim_ref)?.status === before);
+  check(row, 'only one review_decision event', eventsFor(r03.claim?.claim_ref).filter((e) => e === 'review_decision').length === 1); }
 { const row = flow('F7', 'no tipping off (all claimant emails)');
   const all = (await get(`${MAIL}/api/v1/messages?limit=200`)).json?.messages || [];
   const claimant = all.filter((m) => m.To.every((t) => !t.Address.endsWith('@acmecover.example')));
@@ -223,7 +229,36 @@ for (const rv of reviews) {
   const m = await waitFor(async () => (await mailSearch(`to:${ENV.CLAIMFLOW_OPS_EMAIL} subject:"daily report"`))[0]);
   check(row, 'report emailed to ops', !!m);
   check(row, `report counts ${expected} claims`, m?.Subject.includes(`: ${expected} claims`), m?.Subject); }
-{ const row = flow('F10', 'no unexpected workflow errors');
+// Demo mode (workflow 07): the trace page and the login-gated form exist only when it's on.
+const DEMO = docker(['exec', '-T', 'n8n', 'printenv', 'CLAIMFLOW_DEMO_MODE']).trim().toLowerCase() === 'true';
+const linkKey = Buffer.from(ENV.CLAIMFLOW_STATUS_LINK_KEY || '', 'base64');
+const traceToken = (ref) => crypto.createHmac('sha256', linkKey).update(`trace:${ref}`, 'utf8').digest('hex').slice(0, 32);
+const traceUrl = (ref, t = traceToken(ref)) => `${BASE}/webhook/demo/trace?ref=${encodeURIComponent(ref)}&t=${t}`;
+{ const row = flow('F10', `demo mode ${DEMO ? 'on' : 'off'}: trace page + form`);
+  const ref = r03.claim?.claim_ref;
+  const page = await fetch(traceUrl(ref)); const html = await page.text();
+  const statusTok = (r03.response?.status_url || '').match(/t=([0-9a-f]+)/)?.[1];
+  const withStatusTok = await fetch(traceUrl(ref, statusTok));
+  const form = await fetch(`${BASE}/form/claim-demo`, { redirect: 'manual' });
+  row.http = `${page.status}/${form.status}`;
+  if (DEMO) {
+    check(row, 'trace page 200 (HTML)', page.status === 200 && /text\/html/.test(page.headers.get('content-type')), `HTTP ${page.status}`);
+    check(row, 'shows route, flags, AI model and audit trail', html.includes(ref) && html.includes('Fraud review') && html.includes('new_policy') && html.includes('ai_analysed') && html.includes('mock'));
+    check(row, 'shows the review decision', html.includes('approve') && html.includes('fraud.lead@acmecover.example'));
+    check(row, 'no plaintext PI', !html.includes(r03.body.claimant.email) && !html.includes(r03.body.claimant.name));
+    check(row, 'form needs an n8n login', form.status === 302 && /authorize|signin/.test(form.headers.get('location') || ''), `HTTP ${form.status}`);
+  } else {
+    check(row, 'trace page 404 when off', page.status === 404, `HTTP ${page.status}`);
+    check(row, 'form 404 when off', form.status === 404, `HTTP ${form.status}`);
+  }
+  const bad = await fetch(traceUrl(ref, '0'.repeat(32)));
+  check(row, 'tampered token 404', bad.status === 404, `HTTP ${bad.status}`);
+  check(row, "claimant's status token can't open it", withStatusTok.status === 404, `HTTP ${withStatusTok.status}`); }
+{ const row = flow('F11', `execution data (demo ${DEMO ? 'keeps' : 'drops'} runs)`);
+  const n = Number(docker(['exec', '-T', 'postgres', 'psql', '-U', ENV.N8N_DB_USER, '-d', 'n8n', '-tA', '-c',
+    `SELECT count(*) FROM execution_entity WHERE "workflowId" = 'pY62sSjeshgn8nDx' AND status = 'success' AND "deletedAt" IS NULL AND "startedAt" >= ${lit(startedIso)}`]).trim());
+  check(row, DEMO ? 'successful intake runs kept' : 'successful intake runs not kept', DEMO ? n > 0 : n === 0, `${n} kept`); }
+{ const row = flow('F12', 'no unexpected workflow errors');
   const n = Number(sql(`SELECT count(*) FROM workflow_errors WHERE created_at >= ${lit(startedIso)}`));
   check(row, '0 errors logged during the run', n === 0, `${n} logged`); }
 

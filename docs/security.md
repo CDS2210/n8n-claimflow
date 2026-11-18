@@ -113,3 +113,18 @@ Failed runs keep their full data for 7 days so they can be debugged; treat n8n's
 sensitive (encrypted storage, restricted access) in production.
 
 The audit trail in `claim_events` (no PI) is the system of record, not n8n's history.
+
+## Demo mode (`CLAIMFLOW_DEMO_MODE=true`, local demos only)
+
+Demo mode deliberately relaxes two things so the pipeline can be watched, and it is **off by
+default**:
+
+| What changes | Why it's acceptable locally | Guard |
+|---|---|---|
+| `setup.sh` imports Intake, Fraud Review and Notifications with `saveDataSuccessExecution: all`, so successful runs keep every node's input/output (including what was typed in the form) for 7 days | Only invented test data goes in; it's how you click through a run node by node | Off → setup imports the normal JSON again (verified by test F11) |
+| The **Claim Trace** page shows internal signals (scores, flags, route reasons, reviewer notes) | It's an internal view, like the fraud-review email | Signed link `HMAC("trace:"+ref)`, separate from status links; 404 unless demo mode is on; PI shown **masked** only |
+| A claim **form** at `/form/claim-demo` | Lets anyone at the keyboard try it | Requires an **n8n login** (Form Trigger "n8n User Auth"); unpublished when demo mode is off |
+
+The form posts to the intake webhook over the container's loopback (`http://127.0.0.1:5678`), so
+that one hop never leaves the n8n container. Every other hop is unchanged.
+Never enable demo mode on a shared or production instance.

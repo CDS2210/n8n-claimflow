@@ -10,5 +10,6 @@ The main README shows these files. Capture them after `./scripts/setup.sh` and a
 | `04-daily-report.png` | The daily report email (`./scripts/run-report.sh`) |
 | `05-error-alert.png` | A "[ClaimFlow error]" alert email |
 | `06-test-run.png` | Terminal output of `./scripts/run-scenarios.sh` |
+| `07-claim-trace.png` | The Claim Trace page after submitting https://localhost:8443/form/claim-demo (demo mode) |
 
 All data shown is fictional (Acme Cover seed data).

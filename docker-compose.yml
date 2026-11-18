@@ -149,6 +149,9 @@ services:
       CLAIMFLOW_PII_KEY: ${CLAIMFLOW_PII_KEY}
       CLAIMFLOW_PII_HMAC_KEY: ${CLAIMFLOW_PII_HMAC_KEY}
       CLAIMFLOW_STATUS_LINK_KEY: ${CLAIMFLOW_STATUS_LINK_KEY}
+      # Demo mode: claim form + Claim Trace page (workflow 07). Local demos only, never production.
+      CLAIMFLOW_DEMO_MODE: ${CLAIMFLOW_DEMO_MODE:-false}
+      CLAIMFLOW_MAILPIT_URL: https://localhost:${MAILPIT_UI_PORT:-8025}/
 
       # --- Used only by scripts/setup.sh to create credentials (never stored in workflow JSON) ---
       CLAIMFLOW_DB_USER: ${CLAIMFLOW_DB_USER}

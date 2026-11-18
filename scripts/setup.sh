@@ -125,15 +125,32 @@ wf_id()   { sed -n 's/^  "id": "\([^"]*\)",$/\1/p' "$1" | head -1; }
 wf_name() { sed -n 's/^  "name": "\([^"]*\)",$/\1/p' "$1" | head -1; }
 # Import everything first, then publish: a workflow that calls a sub-workflow must not be
 # published before that sub-workflow exists.
+# Demo mode (CLAIMFLOW_DEMO_MODE=true): publish the Demo Portal (07) and keep successful
+# executions of the claim workflows, so each node's input/output can be inspected in n8n.
+# Off: 07 is imported but stays unpublished (form + trace page return 404).
+DEMO_ID=cfDemoPortal0001
+DEMO_KEEP_RUNS=" pY62sSjeshgn8nDx cfFraudReview001 cfNotifications1 "
+demo=false; [ "$(env_val CLAIMFLOW_DEMO_MODE | tr '[:upper:]' '[:lower:]')" = "true" ] && demo=true
 for f in "${files[@]}"; do
   id="$(wf_id "$f")"; [ -n "$id" ] || die "no top-level id in $f"
   n8n_cli unpublish:workflow --id="$id" >/dev/null           # republishing requires unpublish first
-  n8n_cli import:workflow --input="/$f" | grep -qi "imported" || die "could not import $f"
-  ok "imported: $(wf_name "$f")"
+  if $demo && [[ "$DEMO_KEEP_RUNS" == *" $id "* ]]; then
+    $DC exec -T n8n node -e 'const fs=require("fs");const w=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));w.settings.saveDataSuccessExecution="all";fs.writeFileSync(process.argv[2],JSON.stringify(w));' "/$f" /tmp/wf-demo.json
+    n8n_cli import:workflow --input=/tmp/wf-demo.json | grep -qi "imported" || die "could not import $f"
+    $DC exec -T n8n rm -f /tmp/wf-demo.json
+    ok "imported: $(wf_name "$f") (demo mode: keeps successful executions)"
+  else
+    n8n_cli import:workflow --input="/$f" | grep -qi "imported" || die "could not import $f"
+    ok "imported: $(wf_name "$f")"
+  fi
 done
 # n8n won't publish a workflow until every sub-workflow it calls is published, so publish in
 # passes: anything blocked by an unpublished sub-workflow waits for the next pass.
-pending=("${files[@]}")
+pending=()
+for f in "${files[@]}"; do
+  if [ "$(wf_id "$f")" = "$DEMO_ID" ] && ! $demo; then ok "not published: $(wf_name "$f") (CLAIMFLOW_DEMO_MODE is not true)"; continue; fi
+  pending+=("$f")
+done
 while [ "${#pending[@]}" -gt 0 ]; do
   blocked=(); last_err=""
   for f in "${pending[@]}"; do
@@ -173,6 +190,7 @@ ClaimFlow is running.
   Mailpit inbox         : https://localhost:$(grep -E '^MAILPIT_UI_PORT=' .env | cut -d= -f2 | sed 's/[[:space:]]*#.*$//')
   Postgres (TLS only)   : localhost:$(grep -E '^POSTGRES_PORT=' .env | cut -d= -f2 | sed 's/[[:space:]]*#.*$//')
 
+$($demo && printf '  Demo claim form       : https://localhost:%s/form/claim-demo  (log in to n8n first)\n' "${HTTPS_PORT}")
 First time? Create your n8n owner account at the editor URL.
 Browser warnings? Trust certs/ca.crt once (see README, "Trusting the local CA").
 EOF

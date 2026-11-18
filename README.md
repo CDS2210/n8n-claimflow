@@ -8,7 +8,7 @@ a standard queue, human fraud review or rejection. Claimants get emails and a st
 fraud team gets a decision form; ops gets a daily report and alerts.
 
 `n8n 2.47.7` · `PostgreSQL 16` · `Caddy (TLS)` · `Mailpit` · LLM: `mock` / OpenAI / Anthropic / Ollama
-· one command to run · 134 automated end-to-end checks
+· one command to run · 140+ automated end-to-end checks · browser demo mode
 
 > **Acme Cover is fictional.** Every person, policy, email address and phone number in this repo is
 > invented. This is a portfolio project, not affiliated with any real insurer.
@@ -42,8 +42,10 @@ process **without giving it the decision**:
   including where it falls short.
 - **No tipping off.** Claimants never see scores, flags or the word "fraud", in emails or the
   Status API.
-- **Tested end to end.** `./scripts/run-scenarios.sh` resets the data and runs 134 checks over real
-  HTTPS, including submitting the fraud-review form and reading emails from Mailpit.
+- **See it run.** Demo mode adds a claim form and a live **Claim Trace** page: every pipeline step,
+  the AI output, each rule flag, the route and the audit trail, updating while a human reviews.
+- **Tested end to end.** `./scripts/run-scenarios.sh` resets the data and runs 140 checks over real
+  HTTPS (143 with demo mode on), including submitting the fraud-review form and reading emails from Mailpit.
 
 ---
 
@@ -62,6 +64,8 @@ flowchart TB
         status[Claim Status API<br/>signed links]
         report[Daily Ops Report<br/>07:00 SAST]
         errors[Global Error Handler<br/>masked alerts]
+        demo[Demo Portal<br/>claim form · trace page<br/>demo mode only]
+        demo -->|POST /webhook/claims| intake
         intake -->|no wait| fraud
         intake -->|no wait| notify
         fraud --> notify
@@ -101,7 +105,8 @@ Full data model: [docs/database.md](docs/database.md).
 | ![Review form](docs/screenshots/03-review-form.png) | **Decision form** with the claim summary |
 | ![Daily ops report](docs/screenshots/04-daily-report.png) | **Daily ops report** |
 | ![Error alert](docs/screenshots/05-error-alert.png) | **Error alert** with masked details |
-| ![Test run](docs/screenshots/06-test-run.png) | **`run-scenarios.sh`**: 134/134 checks |
+| ![Test run](docs/screenshots/06-test-run.png) | **`run-scenarios.sh`**: every check passing |
+| ![Claim trace](docs/screenshots/07-claim-trace.png) | **Claim Trace** page (demo mode) |
 
 ---
 
@@ -121,7 +126,8 @@ git clone <this repo> claimflow && cd claimflow
 3. starts the stack and waits until it's healthy;
 4. creates the n8n credentials inside the container (secrets never touch disk);
 5. encrypts the seed personal information;
-6. imports the six workflows and publishes them in dependency order;
+6. imports the seven workflows and publishes them in dependency order (the Demo Portal only in
+   demo mode);
 7. runs an HTTPS smoke test.
 
 Then:
@@ -145,10 +151,32 @@ Then:
    ./scripts/run-scenarios.sh
    ```
 
+### Try it in a browser (demo mode)
+
+To log claims through a form and watch them move through the pipeline:
+
+1. In `.env` set `CLAIMFLOW_DEMO_MODE=true` and, for a real model, `LLM_MODE=ollama` (or `openai` /
+   `anthropic` with a key). Then re-run `./scripts/setup.sh`.
+2. Log in to n8n at https://localhost:8443, then open **https://localhost:8443/form/claim-demo**.
+3. Pick a policy, enter made-up details and submit. The form calls the same `POST /webhook/claims`
+   as any client, then opens the **Claim Trace** page: pipeline steps, injection check, AI output
+   (model, score, summary, indicators), every rule flag with its points, the score blend, the route
+   and why, masked PII next to its ciphertext, and the append-only audit trail.
+4. If it went to fraud review, open Mailpit, click **Review and decide**, and watch the trace page
+   update (it refreshes every 3 s while anything is pending).
+5. **Node by node:** in demo mode the claim workflows keep their successful executions, so n8n's
+   **Executions** tab shows every node's input and output for your claim.
+
+Demo mode is for local demos only: the trace page shows internal signals, and kept executions hold
+whatever details you typed. With it off (the default), the form and trace page return 404.
+The first claim after Ollama has been idle takes up to about 40 s while the model loads; after that,
+about 4 s from submit to trace page.
+
 | URL / port | What |
 |---|---|
 | https://localhost:8443 | n8n editor, webhooks, review forms |
 | https://localhost:8025 | Mailpit inbox (every email lands here) |
+| https://localhost:8443/form/claim-demo | Demo claim form (demo mode, n8n login) |
 | `localhost:5433` | PostgreSQL (TLS required) |
 
 Day to day: `docker compose stop` / `docker compose up -d`. Run the daily report now:
@@ -156,7 +184,7 @@ Day to day: `docker compose stop` / `docker compose up -d`. Run the daily report
 
 ---
 
-## The six workflows
+## The workflows
 
 ### 1. Claims Intake: `POST /webhook/claims`
 Validate the payload (all errors at once → **400**) → idempotency check (same key → **200** with the
@@ -192,6 +220,12 @@ The error workflow for all the others. Masks emails, SA phone numbers, ID/card n
 ciphertext, logs to `workflow_errors`, emails a red alert with a link to the failed execution. The
 log and the alert each continue on error, so an SMTP outage can't hide a failure.
 
+### 7. Demo Portal (demo mode only)
+An n8n **Form Trigger** at `/form/claim-demo`, behind n8n's own login, turns the form into a normal
+intake request and posts it to the real webhook, then redirects to `GET /webhook/demo/trace`: an
+internal Claim Trace page behind a signed link (a different HMAC from status links, so a
+claimant's link can't open it). [Design](docs/workflows/07-demo-portal.md)
+
 ---
 
 ## Design decisions
@@ -223,7 +257,7 @@ injection signal → fraud review, even if the AI failed. Nothing is auto-approv
 
 **Data minimisation (POPIA-minded).** The LLM gets claim facts only, never name, email, phone or
 policy number. The fraud-review run, stored while it waits, holds no contact details. Successful
-runs of PII workflows don't keep their data.
+runs of PII workflows don't keep their data (unless demo mode is on).
 
 ---
 
@@ -235,6 +269,7 @@ runs of PII workflows don't keep their data.
 | At rest | Name, email, phone encrypted per field (AES-256-GCM, field-bound, versioned key); email HMAC blind index for lookups; database types reject plaintext |
 | Links | Status links HMAC-signed; review form links signed and single-use (n8n) |
 | Logs | Errors masked before storage or email; successful PII runs keep no execution data (purged within ~5 min) |
+| Demo mode | Off by default; the form needs an n8n login, the trace page a signed link; both 404 when off |
 | Secrets | Generated by `setup.sh` into a gitignored `.env`; credentials created inside the container |
 
 Details, keys and rotation: [docs/security.md](docs/security.md).
@@ -244,16 +279,17 @@ Details, keys and rotation: [docs/security.md](docs/security.md).
 ## Testing and measured results
 
 ```bash
-./scripts/run-scenarios.sh            # 13 scenarios + 10 flow checks, mock mode
+./scripts/run-scenarios.sh            # 13 scenarios + 12 flow checks, mock mode
 ./scripts/run-scenarios.sh --redteam  # held-out injection set, any LLM_MODE
 ```
 
 The suite resets the claim data to the seed state, then checks HTTP codes, routes, rule flags, the
 audit trail, every email (via Mailpit's API), the Status API, all three fraud-review decisions
 submitted through the real form, double-submit protection, no tipping off, that a database dump
-contains no sample PII, the daily report, and that no workflow errors were logged.
+contains no sample PII, the daily report, demo mode (on: trace page, login-gated form, kept runs;
+off: everything 404, no runs kept), and that no workflow errors were logged.
 
-**Result: 134/134 checks, repeatable, about 24 seconds.** Its first runs caught two real bugs.
+**Result: 140/140 checks with demo mode off, 143/143 with it on, about 27 seconds.** Its first runs caught two real bugs.
 Details: [docs/testing.md](docs/testing.md).
 
 ### Prompt-injection red-team (honest numbers)
@@ -284,6 +320,7 @@ All settings live in `.env` (documented in [.env.example](.env.example)). Most u
 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | empty | Re-run `setup.sh` after adding one |
 | `CLAIMFLOW_REVIEW_TIMEOUT_MINUTES` | `1440` | Fraud review escalates after this |
 | `CLAIMFLOW_SLA_HOURS` | `48` | Daily report SLA threshold |
+| `CLAIMFLOW_DEMO_MODE` | `false` | Claim form + trace page, keeps executions; re-run `setup.sh` |
 
 After changing `.env`: `docker compose up -d n8n`.
 
@@ -304,7 +341,7 @@ double with the injection detector's extra call. Tests run in mock mode and cost
 ├── .env.example                every setting, documented
 ├── caddy/Caddyfile             TLS termination
 ├── db/                         init script (TLS-only), schema.sql, seed.sql
-├── workflows/                  the six n8n workflows (JSON, fixed IDs)
+├── workflows/                  the seven n8n workflows (JSON, fixed IDs)
 ├── scripts/
 │   ├── setup.sh                one-command setup (idempotent)
 │   ├── run-scenarios.sh/.mjs   end-to-end tests + red-team mode

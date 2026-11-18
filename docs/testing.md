@@ -58,11 +58,14 @@ Idempotency keys get a per-run suffix, so a run never collides with an earlier o
 | Fraud review: **approve** (03) | read the review email from Mailpit's API, follow the form link, submit | status `approved_for_assessment`, `review_decision` event, claimant email |
 | Fraud review: **reject** (07) | same | `rejected`; claimant email uses neutral wording |
 | Fraud review: **more info** (13) | same, with a message to the claimant | `more_info_required`; claimant gets the message, **not the internal notes** |
-| Double submit | reuse 03's form link | 404, nothing changes |
+| Double submit | reuse 03's form link | 404 (in demo mode n8n shows "Form Submitted", 200), nothing changes, one `review_decision` event |
 | No tipping off | every claimant email in Mailpit | no "fraud", "risk", "score", "flag" |
 | Audit trail | every accepted claim | `received`, `ai_analysed`, `routed` (+ `notification_sent`) |
 | PI at rest | `pg_dump` of `claimflow` | none of the sample names, emails or phone numbers |
 | Daily report | `run-report.sh` | ops email received; claim counts match this run |
+| Demo mode (on) | trace page for 03, tampered token, status token, form without login | 200 with route, flags, AI model, decision, no plaintext PI; 404; 404; 302 to n8n login |
+| Demo mode (off) | same URLs | trace 404, form 404, tokens 404 |
+| Execution data | successful Claims Intake runs in n8n's DB | kept in demo mode, none kept otherwise |
 | No unexpected errors | `workflow_errors` | 0 rows from this run |
 
 Not in the automated run (proven manually in Stage 4/5, too slow or disruptive for every run):
@@ -95,6 +98,19 @@ split across sentences) plus tricky legitimate claims.
 This sends them through the **full pipeline** and reports, per sample, which layers fired and the
 route, plus totals (attacks caught, false alarms). It's a **measurement**, not a pass/fail gate:
 the numbers go into the README for whichever model was used.
+
+## Results (2026-11-18, with demo mode)
+
+**Scenario suite (mock mode): 140/140 checks with `CLAIMFLOW_DEMO_MODE=false`, 143/143 with
+`true`, about 27 s each.** Demo mode found one real difference: with successful runs kept, reusing
+a used review link gets n8n's "Form Submitted" page (200) instead of 404. Nothing is resumed and the
+claim doesn't change, so F6 now checks the outcome (status and a single `review_decision` event)
+rather than only the HTTP code.
+
+The demo form itself requires an n8n login, so the suite checks the login redirect; the form →
+intake → trace flow was verified by hand with a temporary no-login copy (validation errors listed,
+eligibility rejection, fast track, and an injection claim analysed by llama3.2:3b and routed to
+fraud review in about 4 s).
 
 ## Results (2026-11-17)
 

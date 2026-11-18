@@ -7,9 +7,9 @@ data. Don't add any.
 ## CV bullets (pick one per CV, by role)
 
 **General (one line)**
-- Built ClaimFlow, an AI-assisted insurance claims intake and triage pipeline in n8n (6 workflows,
+- Built ClaimFlow, an AI-assisted insurance claims intake and triage pipeline in n8n (7 workflows,
   PostgreSQL, Docker), combining LLM analysis with deterministic rules, human fraud review and a
-  full audit trail, verified by 134 automated end-to-end checks.
+  full audit trail, verified by 140+ automated end-to-end checks, plus a browser demo mode with a live claim trace.
 
 **AI engineering**
 - Designed an LLM claims-triage pipeline where the model is advisory and deterministic rules decide
@@ -34,7 +34,7 @@ data. Don't add any.
 
 > ClaimFlow is an n8n portfolio project: an insurance claims pipeline where an LLM reads the
 > claim, deterministic rules decide what happens, and a human reviews anything suspicious. It
-> encrypts personal data, runs end to end with one command, and ships with 134 automated checks
+> encrypts personal data, runs end to end with one command, and ships with 140+ automated checks, a browser demo,
 > and an honest red-team report of where its AI defences fall short.
 
 ## Interview talking points
