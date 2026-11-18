@@ -5,3 +5,6 @@ node_modules/
 Thumbs.db
 certs/
 ca-private/
+
+# Personal notes kept out of the repo
+docs/CV.md

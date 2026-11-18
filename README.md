@@ -360,7 +360,7 @@ double with the injection detector's extra call. Tests run in mock mode and cost
 │   ├── encrypt-seed-pii.js     encrypts seed PI at setup
 │   └── lib/                    pii-crypto, links, internal-email, make-credentials
 ├── samples/                    13 scenarios + expectations + held-out red-team set
-└── docs/                       database, security, testing, per-workflow designs, CV
+└── docs/                       database, security, testing, per-workflow designs
 ```
 
 ---
@@ -398,4 +398,5 @@ double with the injection detector's extra call. Tests run in mock mode and cost
 [Database](docs/database.md) · [Security](docs/security.md) · [Testing](docs/testing.md) ·
 [Intake design](docs/workflows/01-claims-intake.md) ·
 [Fraud review + notifications](docs/workflows/02-03-subworkflows.md) ·
-[Status API, report, errors](docs/workflows/04-06-api-report-errors.md) · [CV notes](docs/CV.md)
+[Status API, report, errors](docs/workflows/04-06-api-report-errors.md) ·
+[Demo portal](docs/workflows/07-demo-portal.md)
